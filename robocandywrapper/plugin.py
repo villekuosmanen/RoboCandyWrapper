@@ -16,12 +16,12 @@ class DatasetPlugin(ABC):
     """
     
     @abstractmethod
-    def wrap(self, dataset: 'LeRobotDataset') -> 'PluginInstance':
+    def attach(self, dataset: 'LeRobotDataset') -> 'PluginInstance':
         """
         Create a dataset-specific plugin instance.
         
         Args:
-            dataset: The LeRobotDataset to wrap to
+            dataset: The LeRobotDataset to attach to
             
         Returns:
             PluginInstance for this specific dataset

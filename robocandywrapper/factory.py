@@ -69,7 +69,11 @@ def make_dataset(
     )
 
     # Handle single or multiple datasets
-    repo_ids = [cfg.dataset.repo_id] if isinstance(cfg.dataset.repo_id, str) else cfg.dataset.repo_id
+    if cfg.dataset.repo_id.startswith('['):
+        repo_ids = cfg.dataset.repo_id.strip('[]').split(',')
+        repo_ids = [x.strip(' \'') for x in repo_ids]
+    else:
+        repo_ids = [cfg.dataset.repo_id]
     datasets = []
     
     for repo_id in repo_ids:
@@ -91,7 +95,7 @@ def make_dataset(
         if cfg.dataset.use_imagenet_stats:
             for key in dataset.meta.camera_keys:
                 for stats_type, stats in IMAGENET_STATS.items():
-                    dataset.meta.stats[key][stats_type] = torch.tensor(stats, dtype=torch.float32)
+                    dataset.meta.stats[key][stats_type] = torch.tensor(stats, dtype=torch.float32).numpy()
         
         datasets.append(dataset)
     

@@ -3,7 +3,7 @@ import logging
 from typing import Any, Callable, Optional, Sequence, Union
 import warnings
 
-from lerobot.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
 from lerobot.datasets.compute_stats import aggregate_stats
 from lerobot.datasets.video_utils import VideoFrame
 import torch
@@ -100,7 +100,6 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
         """
         return {repo_id: i for i, repo_id in enumerate(self.repo_ids)}
 
-
     @property
     def repo_index_to_id(self):
         """Return the inverse mapping of repo_id_to_index."""
@@ -125,6 +124,11 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
         for dataset in self._datasets:
             features.update({k: v for k, v in dataset.hf_features.items() if k not in self.disabled_features})
         return features
+    
+    @property
+    def meta(self) -> LeRobotDatasetMetadata:
+        """For now just return the metadata of our first dataset"""
+        return self._datasets[0].meta
 
     @property
     def camera_keys(self) -> list[str]:
