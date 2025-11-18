@@ -6,6 +6,7 @@ from robocandywrapper.plugin import (
     PluginConflictError,
 )
 from robocandywrapper.wrapper import WrappedRobotDataset
+from robocandywrapper.metadata_view import WrappedRobotDatasetMetadataView
 from robocandywrapper.samplers.weighted import WeightedSampler
 from robocandywrapper.samplers.factory import make_sampler
 from robocandywrapper.factory import make_dataset_without_config, make_dataset
@@ -18,7 +19,7 @@ __all__ = [
     "PluginInstance",
     "PluginConflictError",
     "WrappedRobotDataset",
-    "UniformSampler",
+    "WrappedRobotDatasetMetadataView",
     "WeightedSampler",
     "make_sampler",
     "make_dataset_without_config",

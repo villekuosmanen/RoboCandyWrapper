@@ -129,6 +129,14 @@ def train(cfg: TrainPipelineConfig):
     logging.info("Creating dataset")
     dataset = make_dataset(cfg)
 
+    # Create sampler for the dataset
+    sampler, shuffle, dataset_weights = make_sampler(dataset)
+    
+    # Update dataset metadata with weights from sampler config
+    if dataset_weights is not None:
+        dataset.update_dataset_weights(dataset_weights)
+        logging.info("Updated dataset metadata with sampler weights")
+
     # Create environment used for evaluating checkpoints during training on simulation data.
     # On real-world data, no need to create an environment as evaluations are done outside train.py,
     # using the eval.py instead, with gym_dora environment and dora-rs.
@@ -164,32 +172,7 @@ def train(cfg: TrainPipelineConfig):
     logging.info(f"{num_learnable_params=} ({format_big_number(num_learnable_params)})")
     logging.info(f"{num_total_params=} ({format_big_number(num_total_params)})")
 
-    # Create dataloader for offline training
-    # Sampler creation: checks for SAMPLER_CONFIG_PATH env variable or uses default shuffling
-    # For multi-dataset training, you can specify dataset weights via a JSON config file:
-    # export SAMPLER_CONFIG_PATH=/path/to/sampler_config.json
-    # See robocandywrapper.samplers.factory.make_sampler for config format
-    sampler, shuffle = make_sampler(dataset)
-    
-    # Note: EpisodeAwareSampler is currently not integrated with WeightedSampler.
-    # If your policy requires drop_n_last_frames, you would need to extend the sampler system.
-    if hasattr(cfg.policy, "drop_n_last_frames") and cfg.policy.drop_n_last_frames > 0:
-        if sampler is not None:
-            logging.warning(
-                "Both WeightedSampler and drop_n_last_frames are specified. "
-                "EpisodeAwareSampler is not yet compatible with WeightedSampler. "
-                "Using WeightedSampler only."
-            )
-        else:
-            # Fall back to EpisodeAwareSampler if no weighted sampler is configured
-            logging.info("Using EpisodeAwareSampler due to drop_n_last_frames policy setting")
-            shuffle = False
-            sampler = EpisodeAwareSampler(
-                dataset.episode_data_index,
-                drop_n_last_frames=cfg.policy.drop_n_last_frames,
-                shuffle=True,
-            )
-
+    # Create dataloader for the dataset
     dataloader = torch.utils.data.DataLoader(
         dataset,
         num_workers=cfg.num_workers,

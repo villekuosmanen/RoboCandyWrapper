@@ -9,6 +9,7 @@ from lerobot.datasets.video_utils import VideoFrame
 import torch
 
 from robocandywrapper import DatasetPlugin, PluginConflictError, PluginInstance
+from robocandywrapper.metadata_view import WrappedRobotDatasetMetadataView
 
 
 class WrappedRobotDataset(torch.utils.data.Dataset):
@@ -21,6 +22,7 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
         image_transforms: Optional[Callable] = None,
         warn_on_key_conflicts: bool = True,
         error_on_key_conflicts: bool = True,
+        dataset_weights: Optional[dict[str, float]] = None,
         **kwargs
     ):
         """
@@ -32,6 +34,7 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
             image_transforms: Optional image transforms
             warn_on_key_conflicts: Warn when plugins have overlapping keys (if not raising errors)
             error_on_key_conflicts: Raise error on key conflicts (default: True)
+            dataset_weights: Optional weights for computing weighted stats (e.g., {"dataset_id": 2.0})
         """
         super().__init__()
         
@@ -62,6 +65,13 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
         
         # Validate plugin keys and warn about conflicts
         self._validate_plugin_keys()
+        
+        # Create metadata view that collates features and stats across all datasets
+        self._meta = WrappedRobotDatasetMetadataView(
+            datasets=self._datasets,
+            plugin_instances=self._plugin_instances,
+            dataset_weights=dataset_weights,
+        )
 
         # ** MATCHING LeRobot MULTI-DATASET API DESIGN **
         
@@ -85,7 +95,8 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
             )
             self.disabled_features.update(extra_keys)
 
-        self.stats = aggregate_stats([dataset.meta.stats for dataset in self._datasets])
+        # Keep backward compatible stats property
+        self.stats = self._meta.stats
     
     @property
     def repo_ids(self) -> list[str]:
@@ -107,8 +118,12 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
 
     @property
     def fps(self) -> int:
-        """Frames per second used during data collection. For now, we assume all datasets have the same fps."""
-        return self._datasets[0].meta.info["fps"]
+        """
+        Frames per second used during data collection.
+        
+        Warns if datasets have different FPS values.
+        """
+        return self._meta.fps
 
     @property
     def video(self) -> bool:
@@ -120,24 +135,38 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
 
     @property
     def features(self) -> datasets.Features:
+        """
+        Features available across all datasets and plugins.
+        
+        Returns union of dataset features (minus disabled ones) and plugin features.
+        """
         features = {}
         for dataset in self._datasets:
             features.update({k: v for k, v in dataset.hf_features.items() if k not in self.disabled_features})
+        
+        # Add plugin features (from metadata view)
+        # Note: These may not have full type info, but they'll be available
+        for key in self._meta.features:
+            if key not in features and key not in self.disabled_features:
+                # Plugin feature - will be inferred from actual data
+                features[key] = self._meta.features[key]
+        
         return features
     
     @property
-    def meta(self) -> LeRobotDatasetMetadata:
-        """For now just return the metadata of our first dataset"""
-        return self._datasets[0].meta
+    def meta(self) -> WrappedRobotDatasetMetadataView:
+        """
+        Collated metadata view across all datasets and plugins.
+        
+        Provides features and stats aggregated across all component datasets,
+        optionally weighted if dataset_weights were provided during initialization.
+        """
+        return self._meta
 
     @property
     def camera_keys(self) -> list[str]:
-        """Keys to access image and video stream from cameras."""
-        keys = []
-        for key, feats in self.features.items():
-            if isinstance(feats, (datasets.Image, VideoFrame)):
-                keys.append(key)
-        return keys
+        """Keys to access image and video stream from cameras (union across all datasets)."""
+        return self._meta.camera_keys
 
     @property
     def video_frame_keys(self) -> list[str]:
@@ -192,6 +221,21 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
             ranges.append((start_idx, end_idx))
             ids.append(dataset.repo_id)
         return ranges, ids
+    
+    def update_dataset_weights(self, dataset_weights: dict[str, float]) -> None:
+        """
+        Update dataset weights for weighted stats computation.
+        
+        This is typically called after sampler creation, when weights are
+        extracted from the sampler configuration.
+        
+        Args:
+            dataset_weights: Dict mapping dataset repo IDs to weight multipliers
+                           (e.g., {"dataset1": 2.0, "dataset2": 0.5})
+        """
+        self._meta.update_dataset_weights(dataset_weights)
+        # Also update the cached stats property
+        self.stats = self._meta.stats
 
     def _validate_plugin_keys(self):
         """Check for key conflicts between plugins."""
