@@ -6,8 +6,8 @@ from robocandywrapper.plugin import (
     PluginConflictError,
 )
 from robocandywrapper.wrapper import WrappedRobotDataset
-from robocandywrapper.samplers.uniform import UniformSampler
 from robocandywrapper.samplers.weighted import WeightedSampler
+from robocandywrapper.samplers.factory import make_sampler
 from robocandywrapper.factory import make_dataset_without_config, make_dataset
 from robocandywrapper.utils import WandBLogger
 
@@ -20,6 +20,7 @@ __all__ = [
     "WrappedRobotDataset",
     "UniformSampler",
     "WeightedSampler",
+    "make_sampler",
     "make_dataset_without_config",
     "make_dataset",
     "WandBLogger",

@@ -51,6 +51,7 @@ from lerobot.utils.utils import (
 )
 
 from robocandywrapper.factory import make_dataset
+from robocandywrapper.samplers import make_sampler
 from robocandywrapper.utils import WandBLogger
 
 
@@ -163,17 +164,31 @@ def train(cfg: TrainPipelineConfig):
     logging.info(f"{num_learnable_params=} ({format_big_number(num_learnable_params)})")
     logging.info(f"{num_total_params=} ({format_big_number(num_total_params)})")
 
-    # create dataloader for offline training
-    if hasattr(cfg.policy, "drop_n_last_frames"):
-        shuffle = False
-        sampler = EpisodeAwareSampler(
-            dataset.episode_data_index,
-            drop_n_last_frames=cfg.policy.drop_n_last_frames,
-            shuffle=True,
-        )
-    else:
-        shuffle = True
-        sampler = None
+    # Create dataloader for offline training
+    # Sampler creation: checks for SAMPLER_CONFIG_PATH env variable or uses default shuffling
+    # For multi-dataset training, you can specify dataset weights via a JSON config file:
+    # export SAMPLER_CONFIG_PATH=/path/to/sampler_config.json
+    # See robocandywrapper.samplers.factory.make_sampler for config format
+    sampler, shuffle = make_sampler(dataset)
+    
+    # Note: EpisodeAwareSampler is currently not integrated with WeightedSampler.
+    # If your policy requires drop_n_last_frames, you would need to extend the sampler system.
+    if hasattr(cfg.policy, "drop_n_last_frames") and cfg.policy.drop_n_last_frames > 0:
+        if sampler is not None:
+            logging.warning(
+                "Both WeightedSampler and drop_n_last_frames are specified. "
+                "EpisodeAwareSampler is not yet compatible with WeightedSampler. "
+                "Using WeightedSampler only."
+            )
+        else:
+            # Fall back to EpisodeAwareSampler if no weighted sampler is configured
+            logging.info("Using EpisodeAwareSampler due to drop_n_last_frames policy setting")
+            shuffle = False
+            sampler = EpisodeAwareSampler(
+                dataset.episode_data_index,
+                drop_n_last_frames=cfg.policy.drop_n_last_frames,
+                shuffle=True,
+            )
 
     dataloader = torch.utils.data.DataLoader(
         dataset,

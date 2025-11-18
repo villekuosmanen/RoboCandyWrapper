@@ -5,9 +5,17 @@ import torch.utils.data
 
 class WeightedSampler(torch.utils.data.Sampler):
     """
-    Sample from datasets with specified weights/ratios.
+    Sample from datasets with specified weight multipliers.
     
-    This allows you to oversample/undersample specific datasets by their IDs.
+    Weights act as multipliers on dataset sizes. A weight of 2.0 means
+    "sample from this dataset as if it were 2x larger".
+    
+    Example:
+        - Dataset A: 10,000 frames, weight 1.0 → effective size 10,000
+        - Dataset B: 1,000 frames, weight 2.0 → effective size 2,000
+        - Total effective size: 12,000
+        - Dataset A gets 10,000/12,000 = 83.3% of samples
+        - Dataset B gets 2,000/12,000 = 16.7% of samples
     """
     
     def __init__(
@@ -27,6 +35,8 @@ class WeightedSampler(torch.utils.data.Sampler):
             dataset_ranges: List of (start_idx, end_idx) tuples for each dataset
             dataset_ids: List of dataset repo IDs corresponding to ranges
             dataset_weights: Dict mapping dataset IDs to weight multipliers.
+                           Weights multiply the effective dataset size.
+                           Weight 2.0 = sample as if dataset were 2x larger.
                            Datasets not in dict get weight 1.0. Example:
                            {"janedoe/rare-data": 3.0, "janedoe/boring-data": 0.5}
             samples_per_epoch: Total samples per epoch. If None, uses sum of dataset lengths.
@@ -47,16 +57,18 @@ class WeightedSampler(torch.utils.data.Sampler):
         self.dataset_lengths = [end - start for start, end in dataset_ranges]
         self.total_length = sum(self.dataset_lengths)
         
-        # Build weights array: use custom weights if provided, otherwise 1.0
-        weights = []
+        # Build effective dataset sizes by multiplying length by weight multiplier
+        # Weights are multipliers (e.g., 2.0 means sample 2x as often)
+        # Effective size = original_size * weight_multiplier
+        effective_sizes = []
         for dataset_id, length in zip(dataset_ids, self.dataset_lengths):
+            weight_multiplier = 1.0
             if dataset_weights and dataset_id in dataset_weights:
-                weights.append(dataset_weights[dataset_id])
-            else:
-                weights.append(1.0)
+                weight_multiplier = dataset_weights[dataset_id]
+            effective_sizes.append(length * weight_multiplier)
         
-        # Normalize weights
-        self.weights = np.array(weights, dtype=np.float64)
+        # Normalize effective sizes to get sampling weights
+        self.weights = np.array(effective_sizes, dtype=np.float64)
         self.weights /= self.weights.sum()
         
         # Determine total samples per epoch
