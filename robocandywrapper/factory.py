@@ -1,12 +1,10 @@
 import logging
-from pprint import pformat
 from typing import List, Optional
 
 import torch
 
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.configs.train import TrainPipelineConfig
-from lerobot.constants import HF_LEROBOT_HOME
 from lerobot.datasets.lerobot_dataset import (
     LeRobotDataset,
     LeRobotDatasetMetadata,
@@ -115,7 +113,7 @@ def make_dataset(
 
 def make_dataset_without_config(
     repo_id: str | list[str],
-    action_delta_indices: List,
+    action_delta_indices: List = None,
     observation_delta_indices: List = None,
     root: str = None,
     video_backend: str = "pyav",
@@ -155,7 +153,8 @@ def make_dataset_without_config(
     for repo_id_str in repo_ids:
         ds_meta = LeRobotDatasetMetadata(
             repo_id_str,
-            root=root if root else HF_LEROBOT_HOME / repo_id_str,
+            root=root,
+            revision=revision,
         )
         delta_timestamps = resolve_delta_timestamps_without_config(
             ds_meta, action_delta_indices, observation_delta_indices
@@ -194,12 +193,13 @@ def make_dataset_without_config(
 def resolve_delta_timestamps_without_config(
     ds_meta: LeRobotDatasetMetadata, action_delta_indices: List, observation_delta_indices: List = None
 ) -> dict[str, list] | None:
-    """Resolves delta_timestamps by reading from the 'delta_indices' properties of the PreTrainedConfig.
+    """Resolves delta_timestamps from provided delta_indices parameters.
 
     Args:
-        cfg (PreTrainedConfig): The PreTrainedConfig to read delta_indices from.
         ds_meta (LeRobotDatasetMetadata): The dataset from which features and fps are used to build
             delta_timestamps against.
+        action_delta_indices (List): Delta indices for actions
+        observation_delta_indices (List, optional): Delta indices for observations
 
     Returns:
         dict[str, list] | None: A dictionary of delta_timestamps, e.g.:
@@ -211,9 +211,9 @@ def resolve_delta_timestamps_without_config(
     """
     delta_timestamps = {}
     for key in ds_meta.features:
-        if key == "action" and action_delta_indices is not None:
+        if key == ACTION and action_delta_indices is not None:
             delta_timestamps[key] = [i / ds_meta.fps for i in action_delta_indices]
-        if key.startswith("observation.state") and observation_delta_indices is not None:
+        if key.startswith("observation.") and observation_delta_indices is not None:
             delta_timestamps[key] = [i / ds_meta.fps for i in observation_delta_indices]
 
     if len(delta_timestamps) == 0:
