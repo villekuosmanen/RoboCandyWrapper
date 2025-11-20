@@ -29,6 +29,14 @@ class EpisodeOutcomePlugin(DatasetPlugin):
         {"episode_index": 1, "outcome": "failure"},
         {"episode_index": 2, "outcome": "unknown"}
     ]
+    
+    Returns:
+        - episode_outcome: torch.bool (True=success, False=failure)
+        - episode_outcome_mask: torch.bool (True=labeled, False=unlabeled)
+        
+    When mask is False, the episode is unlabeled. When mask is True,
+    outcome indicates success (True) or failure (False). "unknown"
+    labels are treated as unlabeled (mask=False).
     """
     
     def __init__(self):
@@ -74,28 +82,30 @@ class EpisodeOutcomeInstance(PluginInstance):
         
         Returns:
             dict with:
-                - episode_outcome: torch.Tensor of shape (3,) with one-hot encoding
-                                   [success, failure, unknown]
-                - episode_outcome_mask: torch.bool indicating if outcome is available
+                - episode_outcome: torch.bool (True = success, False = failure)
+                - episode_outcome_mask: torch.bool indicating if outcome is labeled
+                
+            When mask is False, the episode is unlabeled (unknown).
+            When mask is True, outcome indicates success (True) or failure (False).
         """
         if episode_idx in self.outcomes:
             outcome = self.outcomes[episode_idx]
-            has_outcome = True
             
-            # Convert to one-hot encoding
-            if outcome == "success":
-                outcome_vector = torch.tensor([1.0, 0.0, 0.0])
-            elif outcome == "failure":
-                outcome_vector = torch.tensor([0.0, 1.0, 0.0])
-            else:  # unknown
-                outcome_vector = torch.tensor([0.0, 0.0, 1.0])
+            if outcome == "unknown":
+                # Labeled as unknown - treat as unlabeled
+                is_success = False
+                has_outcome = False
+            else:
+                # Labeled as success or failure
+                is_success = (outcome == "success")
+                has_outcome = True
         else:
-            # No outcome for this episode, return unknown
-            outcome_vector = torch.tensor([0.0, 0.0, 1.0])
+            # No outcome for this episode (unlabeled)
+            is_success = False
             has_outcome = False
         
         return {
-            "episode_outcome": outcome_vector.float(),
+            "episode_outcome": torch.tensor(is_success, dtype=torch.bool),
             "episode_outcome_mask": torch.tensor(has_outcome, dtype=torch.bool)
         }
     
