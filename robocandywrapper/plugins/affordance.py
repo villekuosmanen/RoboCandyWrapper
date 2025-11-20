@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 import warnings
 from pathlib import Path
 
@@ -51,9 +51,19 @@ class AffordanceInstance(PluginInstance):
         """This plugin adds affordance-related keys."""
         return ["affordance", "affordance_mask"]
     
-    def get_item_data(self, idx: int, episode_idx: int) -> dict[str, Any]:
+    def get_item_data(
+        self,
+        idx: int,
+        episode_idx: int,
+        accumulated_data: Optional[Dict[str, Any]] = None
+    ) -> dict[str, Any]:
         """
         Get affordance coordinates for this frame.
+        
+        Args:
+            idx: Global index in the dataset
+            episode_idx: Episode index
+            accumulated_data: Data from previous plugins (not used by this plugin)
         
         Returns:
             dict with:

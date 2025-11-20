@@ -1,7 +1,7 @@
 """
 Episode Outcome Plugin for labeling episode success/failure.
 """
-from typing import Any, Dict, Literal
+from typing import Any, Dict, Literal, Optional
 import json
 import warnings
 from pathlib import Path
@@ -56,11 +56,21 @@ class EpisodeOutcomeInstance(PluginInstance):
         """This plugin adds outcome-related keys."""
         return ["episode_outcome", "episode_outcome_mask"]
     
-    def get_item_data(self, idx: int, episode_idx: int) -> dict[str, Any]:
+    def get_item_data(
+        self,
+        idx: int,
+        episode_idx: int,
+        accumulated_data: Optional[Dict[str, Any]] = None
+    ) -> dict[str, Any]:
         """
         Get episode outcome for this frame.
         
         Note: All frames in an episode share the same outcome.
+        
+        Args:
+            idx: Global index in the dataset
+            episode_idx: Episode index
+            accumulated_data: Data from previous plugins (not used by this plugin)
         
         Returns:
             dict with:
