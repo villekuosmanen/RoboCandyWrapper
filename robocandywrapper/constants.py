@@ -7,6 +7,7 @@ CANDYWRAPPER_PLUGINS_DIR = "candywrapper_plugins"
 
 # Plugin-specific subdirectory names
 AFFORDANCE_PLUGIN_NAME = "affordance"
+EPISODE_OUTCOME_PLUGIN_NAME = "episode_outcome"
 # Add more plugin names here as needed
 # GOAL_PLUGIN_NAME = "goal"
 # LANGUAGE_PLUGIN_NAME = "language"

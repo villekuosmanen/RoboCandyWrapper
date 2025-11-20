@@ -1,0 +1,27 @@
+# Example Episode Outcome Labels File
+#
+# Format: episode_range:outcome
+#
+# Supported formats:
+#   - Single episode:    5:success
+#   - Episode range:     0-42:failure  
+#   - Open-ended range:  44-:success (from 44 to end of dataset)
+#
+# Valid outcomes: success, failure, unknown
+#
+# Lines starting with # are comments and will be ignored
+# Blank lines are also ignored
+
+# Training episodes (successful)
+0-42: success
+
+# Known failure
+43: failure
+
+# Rest are successful
+44-: success
+
+# Validation set (not yet evaluated)
+# 100-110: unknown
+
+

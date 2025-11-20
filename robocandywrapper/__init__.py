@@ -14,6 +14,7 @@ from robocandywrapper.utils import WandBLogger
 from robocandywrapper.constants import (
     CANDYWRAPPER_PLUGINS_DIR,
     AFFORDANCE_PLUGIN_NAME,
+    EPISODE_OUTCOME_PLUGIN_NAME,
 )
 
 __version__ = "0.1.0"
@@ -31,4 +32,5 @@ __all__ = [
     "WandBLogger",
     "CANDYWRAPPER_PLUGINS_DIR",
     "AFFORDANCE_PLUGIN_NAME",
+    "EPISODE_OUTCOME_PLUGIN_NAME",
 ]
