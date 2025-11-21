@@ -46,7 +46,3 @@ Learn how to combine multiple datasets into one, handle different robot configur
 ### 🧂 [The "Flavor Enhancer" (Adding Data)](docs/guide_adding_data.md)
 Learn how to use **Adapters** to inject new data (like language instructions or quality scores) or fix shape mismatches without modifying your original files.
 
-## Deep Dive
-
-*   [**v2.1 vs v3.0 Compatibility:**](docs/v2_v3_format_comparison.md) Understanding the technical differences under the hood.
-*   **Legacy Support:** Note that `LegacyLeRobotDataset` relies on internal `lerobot` utilities. See the docs for details on version pinning.
