@@ -13,8 +13,8 @@ from robocandywrapper import make_dataset_without_config
 
 # Your playlist of datasets
 repo_ids = [
-    "lerobot/pusht_v2",      # A classic v2.1 dataset
-    "lerobot/aloha_v3",      # A shiny new v3.0 dataset
+    "lerobot/pusht_v2",      # v2.1 format dataset
+    "lerobot/aloha_v3",      # v3.0 format dataset
 ]
 
 # Create the mixed dataset
@@ -26,13 +26,13 @@ print(f"Total episodes: {len(dataset)}")
 
 ## Advanced Mixing: Sampling Weights
 
-Sometimes you want to hear more of one song than another. You can control how often data is sampled from each dataset using a configuration dictionary.
+You can control how often data is sampled from each dataset using sampling weights. A weight of 2.0 effectively doubles the size of that dataset in the mix (samples are drawn twice as often).
 
 ```python
 config = {
     "dataset_weights": {
         "lerobot/pusht_v2": 1.0,  # Standard weight
-        "lerobot/aloha_v3": 2.0,  # Double the sampling probability
+        "lerobot/aloha_v3": 2.0,  # Effectively doubles this dataset's size in the mix
     }
 }
 
@@ -55,7 +55,7 @@ If you try to mix incompatible shapes, RoboCandyWrapper will raise a `ValueError
 
 ### "Shape Mismatch Error"
 This means one of your datasets has a different feature dimension than the others.
-**Fix:** Check the `info.json` of your datasets. You may need to use an **Adapter** (see [Adding Data](./guide_adding_data.md)) to pad or project the data to a common shape.
+**Fix:** Check the `info.json` of your datasets. You may need to preprocess your data to align shapes, or use compatible datasets. **Plugins** (see [Transforming Data](./guide_transforming_data.md)) are still under development and may not be suitable for production use.
 
 ### "Version Not Detected"
 RoboCandyWrapper checks for specific files to guess the version (e.g., `episodes.jsonl` for v2.1).

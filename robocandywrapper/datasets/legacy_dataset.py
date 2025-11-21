@@ -495,7 +495,8 @@ class LegacyLeRobotDataset(torch.utils.data.Dataset):
         episode_indices = torch.stack([torch.tensor(e) if not isinstance(e, torch.Tensor) else e 
                                         for e in self.hf_dataset["episode_index"]]).numpy()
         ep_data_index_np = {k: t.numpy() for k, t in self.episode_data_index.items()}
-        check_timestamps_sync(timestamps, episode_indices, ep_data_index_np, self.fps, self.tolerance_s)
+        # Warn instead of error on timestamp sync issues (some datasets have data quality issues)
+        check_timestamps_sync(timestamps, episode_indices, ep_data_index_np, self.fps, self.tolerance_s, raise_value_error=False)
 
         # Setup delta_indices
         if self.delta_timestamps is not None:
@@ -680,11 +681,33 @@ class LegacyLeRobotDataset(torch.utils.data.Dataset):
         return query_timestamps
 
     def _query_hf_dataset(self, query_indices: dict[str, list[int]]) -> dict:
-        return {
-            key: torch.stack(self.hf_dataset.select(q_idx)[key])
-            for key, q_idx in query_indices.items()
-            if key not in self.meta.video_keys
-        }
+        result = {}
+        for key, q_idx in query_indices.items():
+            if key not in self.meta.video_keys:
+                # Get the column data - select() returns a DatasetView, accessing [key] gives a Column
+                # Convert Column to list first, then to tensors
+                column_data = self.hf_dataset.select(q_idx)[key]
+                # Convert Column to list
+                if hasattr(column_data, 'to_list'):
+                    data_list = column_data.to_list()
+                elif hasattr(column_data, '__iter__') and not isinstance(column_data, (str, bytes)):
+                    data_list = list(column_data)
+                else:
+                    data_list = [column_data]
+                
+                # Convert list to tensors
+                tensors = []
+                for val in data_list:
+                    if isinstance(val, torch.Tensor):
+                        tensors.append(val)
+                    else:
+                        tensors.append(torch.tensor(val))
+                
+                if len(tensors) > 0:
+                    result[key] = torch.stack(tensors)
+                else:
+                    result[key] = torch.tensor([])
+        return result
 
     def _query_videos(self, query_timestamps: dict[str, list[float]], ep_idx: int) -> dict[str, torch.Tensor]:
         """Note: When using data workers (e.g. DataLoader with num_workers>0), do not call this function

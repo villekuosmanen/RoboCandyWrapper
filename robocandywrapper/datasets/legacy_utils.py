@@ -192,6 +192,15 @@ def check_timestamps_sync(
                 This might be due to synchronization issues during data collection.
                 \n{pformat(outside_tolerances)}"""
             )
+        else:
+            # Log warning instead of raising error
+            import logging
+            logging.warning(
+                f"Timestamp sync check failed: {len(outside_tolerances)} violations found. "
+                f"This might be due to synchronization issues during data collection. "
+                f"Continuing anyway, but results may be affected. "
+                f"First few violations:\n{pformat(outside_tolerances[:5])}"
+            )
         return False
 
     return True

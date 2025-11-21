@@ -43,6 +43,7 @@ print(f"🎉 Successfully loaded {len(dataset)} episodes from mixed sources!")
 ### 🎧 [The "Mix Tape" (Mixing Datasets)](docs/guide_mixing_datasets.md)
 Learn how to combine multiple datasets into one, handle different robot configurations, and use sampling weights to balance your data mix.
 
-### 🧂 [The "Flavor Enhancer" (Adding Data)](docs/guide_adding_data.md)
-Learn how to use **Adapters** to inject new data (like language instructions or quality scores) or fix shape mismatches without modifying your original files.
+### 🧂 [The "Flavor Enhancer" (Transforming Data)](docs/guide_transforming_data.md)
+> **⚠️ Under Development:** Learn how to use **Plugins** to add new data fields, reshape tensors, or modify existing data on-the-fly without changing your original files. This feature is still under active development and may not be suitable for production use.
+
 
