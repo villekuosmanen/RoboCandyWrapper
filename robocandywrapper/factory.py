@@ -2,6 +2,7 @@ import logging
 from typing import List, Optional
 
 import torch
+import packaging.version
 
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.configs.train import TrainPipelineConfig
@@ -9,45 +10,137 @@ from lerobot.datasets.lerobot_dataset import (
     LeRobotDataset,
     LeRobotDatasetMetadata,
 )
+from lerobot.datasets.backward_compatibility import BackwardCompatibilityError
 from lerobot.datasets.transforms import ImageTransforms
 from lerobot.datasets.factory import IMAGENET_STATS
-from lerobot.constants import ACTION, REWARD
+from lerobot.utils.constants import ACTION, REWARD
 
 from robocandywrapper.wrapper import WrappedRobotDataset
 from robocandywrapper import DatasetPlugin
+from robocandywrapper.datasets.legacy_dataset import LegacyLeRobotDataset, LegacyLeRobotDatasetMetadata
 
+# Version threshold for legacy dataset detection
+LEGACY_VERSION_THRESHOLD = packaging.version.parse("2.1")
+
+def _indices_to_times(indices: List, fps: float) -> List[float]:
+    """Helper to convert frame indices to time offsets."""
+    return [i / fps for i in indices]
 
 def resolve_delta_timestamps(
-    cfg: PreTrainedConfig, ds_meta: LeRobotDatasetMetadata
+    ds_meta: LeRobotDatasetMetadata,
+    cfg: Optional[PreTrainedConfig] = None,
+    action_delta_indices: Optional[List] = None,
+    observation_delta_indices: Optional[List] = None,
+    reward_delta_indices: Optional[List] = None,
 ) -> dict[str, list] | None:
-    """Resolves delta_timestamps by reading from the 'delta_indices' properties of the PreTrainedConfig.
-
+    """Converts frame indices into temporal offsets using dataset FPS.
+    
+    Accepts either a config object OR direct index arrays.
+    
     Args:
-        cfg (PreTrainedConfig): The PreTrainedConfig to read delta_indices from.
-        ds_meta (LeRobotDatasetMetadata): The dataset from which features and fps are used to build
-            delta_timestamps against.
-
+        ds_meta: Dataset metadata providing the FPS for conversion.
+        cfg: Optional config containing delta_indices. If provided, takes precedence.
+        action_delta_indices: Direct frame indices for actions (used if cfg is None).
+        observation_delta_indices: Direct frame indices for observations (used if cfg is None).
+        reward_delta_indices: Direct frame indices for rewards (used if cfg is None).
+    
     Returns:
-        dict[str, list] | None: A dictionary of delta_timestamps, e.g.:
-            {
-                "observation.state": [-0.04, -0.02, 0]
-                "observation.action": [-0.02, 0, 0.02]
-            }
-            returns `None` if the resulting dict is empty.
+        Dictionary mapping features to time offsets (in seconds), or None if no deltas configured.
     """
+    # Extract indices from config if provided, otherwise use direct parameters
+    if cfg is not None:
+        action_indices = cfg.action_delta_indices
+        observation_indices = cfg.observation_delta_indices
+        reward_indices = cfg.reward_delta_indices
+    else:
+        action_indices = action_delta_indices
+        observation_indices = observation_delta_indices
+        reward_indices = reward_delta_indices
+    
     delta_timestamps = {}
     for key in ds_meta.features:
-        if key == REWARD and cfg.reward_delta_indices is not None:
-            delta_timestamps[key] = [i / ds_meta.fps for i in cfg.reward_delta_indices]
-        if key == ACTION and cfg.action_delta_indices is not None:
-            delta_timestamps[key] = [i / ds_meta.fps for i in cfg.action_delta_indices]
-        if key.startswith("observation.") and cfg.observation_delta_indices is not None:
-            delta_timestamps[key] = [i / ds_meta.fps for i in cfg.observation_delta_indices]
+        if key == REWARD and reward_indices is not None:
+            delta_timestamps[key] = _indices_to_times(reward_indices, ds_meta.fps)
+        if key == ACTION and action_indices is not None:
+            delta_timestamps[key] = _indices_to_times(action_indices, ds_meta.fps)
+        if key.startswith("observation.") and observation_indices is not None:
+            delta_timestamps[key] = _indices_to_times(observation_indices, ds_meta.fps)
+    
+    return delta_timestamps if delta_timestamps else None
 
-    if len(delta_timestamps) == 0:
-        delta_timestamps = None
+def _create_datasets(
+    repo_ids: List[str],
+    root: Optional[str],
+    revision: Optional[str],
+    episodes: Optional[list[int]],
+    video_backend: str,
+    action_delta_indices: Optional[List] = None,
+    observation_delta_indices: Optional[List] = None,
+    reward_delta_indices: Optional[List] = None,
+    use_imagenet_stats: bool = True,
+) -> List[LeRobotDataset | LegacyLeRobotDataset]:
+    """Private helper to create dataset instances from a list of repo IDs.
+    
+    Args:
+        repo_ids: List of repository IDs to load.
+        root: Root directory for datasets.
+        revision: Dataset revision.
+        episodes: Specific episodes to load.
+        video_backend: Video backend to use.
+        action_delta_indices: Frame indices for actions.
+        observation_delta_indices: Frame indices for observations.
+        reward_delta_indices: Frame indices for rewards.
+        use_imagenet_stats: Whether to apply ImageNet normalization stats.
+    
+    Returns:
+        List of dataset instances.
+    """
+    datasets = []
+    
+    for repo_id in repo_ids:
+        # Try loading as v3.0 first
+        try:
+            ds_meta = LeRobotDatasetMetadata(
+                repo_id, root=root, revision=revision
+            )
+            dataset_cls = LeRobotDataset
+        except (BackwardCompatibilityError, NotImplementedError):
+            # use legacy loader
+            ds_meta = LegacyLeRobotDatasetMetadata(
+                repo_id, root=root, revision=revision
+            )
+            dataset_cls = LegacyLeRobotDataset
 
-    return delta_timestamps
+        delta_timestamps = resolve_delta_timestamps(
+            ds_meta,
+            action_delta_indices=action_delta_indices,
+            observation_delta_indices=observation_delta_indices,
+            reward_delta_indices=reward_delta_indices,
+        )
+
+        dataset = dataset_cls(
+            repo_id,
+            root=root,
+            episodes=episodes,
+            delta_timestamps=delta_timestamps,
+            image_transforms=None,  # Will be applied by WrappedRobotDataset
+            revision=revision,
+            video_backend=video_backend,
+        )
+        
+        # Apply ImageNet stats if needed
+        if use_imagenet_stats:
+            for key in dataset.meta.camera_keys:
+                for stats_type, stats in IMAGENET_STATS.items():
+                    dataset.meta.stats[key][stats_type] = torch.tensor(stats, dtype=torch.float32).numpy()
+        
+        datasets.append(dataset)
+    
+    if len(repo_ids) > 1:
+        logging.info(f"Multiple datasets were provided: {repo_ids}")
+    
+    return datasets
+
 
 def make_dataset(
     cfg: TrainPipelineConfig,
@@ -72,35 +165,19 @@ def make_dataset(
         repo_ids = [x.strip(' \'') for x in repo_ids]
     else:
         repo_ids = [cfg.dataset.repo_id]
-    datasets = []
     
-    for repo_id in repo_ids:
-        ds_meta = LeRobotDatasetMetadata(
-            repo_id, root=cfg.dataset.root, revision=cfg.dataset.revision
-        )
-        delta_timestamps = resolve_delta_timestamps(cfg.policy, ds_meta)
-        dataset = LeRobotDataset(
-            repo_id,
-            root=cfg.dataset.root,
-            episodes=cfg.dataset.episodes,
-            delta_timestamps=delta_timestamps,
-            image_transforms=None,  # Will be applied by WrappedRobotDataset
-            revision=cfg.dataset.revision,
-            video_backend=cfg.dataset.video_backend,
-        )
-        
-        # Apply ImageNet stats if needed
-        if cfg.dataset.use_imagenet_stats:
-            for key in dataset.meta.camera_keys:
-                for stats_type, stats in IMAGENET_STATS.items():
-                    dataset.meta.stats[key][stats_type] = torch.tensor(stats, dtype=torch.float32).numpy()
-        
-        datasets.append(dataset)
-    
-    if len(repo_ids) > 1:
-        logging.info(
-            f"Multiple datasets were provided: {repo_ids}"
-        )
+    # Create datasets using the helper
+    datasets = _create_datasets(
+        repo_ids=repo_ids,
+        root=cfg.dataset.root,
+        revision=cfg.dataset.revision,
+        episodes=cfg.dataset.episodes,
+        video_backend=cfg.dataset.video_backend,
+        action_delta_indices=cfg.policy.action_delta_indices,
+        observation_delta_indices=cfg.policy.observation_delta_indices,
+        reward_delta_indices=cfg.policy.reward_delta_indices,
+        use_imagenet_stats=cfg.dataset.use_imagenet_stats,
+    )
     
     # Wrap in WrappedRobotDataset with plugins
     wrapped_dataset = WrappedRobotDataset(
@@ -110,6 +187,7 @@ def make_dataset(
     )
     
     return wrapped_dataset
+
 
 def make_dataset_without_config(
     repo_id: str | list[str],
@@ -148,39 +226,17 @@ def make_dataset_without_config(
     else:
         repo_ids = [repo_id]
     
-    # Create datasets
-    datasets = []
-    for repo_id_str in repo_ids:
-        ds_meta = LeRobotDatasetMetadata(
-            repo_id_str,
-            root=root,
-            revision=revision,
-        )
-        delta_timestamps = resolve_delta_timestamps_without_config(
-            ds_meta, action_delta_indices, observation_delta_indices
-        )
-        
-        dataset = LeRobotDataset(
-            repo_id_str,
-            root=root,
-            episodes=episodes,
-            delta_timestamps=delta_timestamps,
-            revision=revision,
-            video_backend=video_backend,
-        )
-        
-        # Apply ImageNet stats if needed
-        if use_imagenet_stats:
-            for key in dataset.meta.camera_keys:
-                for stats_type, stats in IMAGENET_STATS.items():
-                    dataset.meta.stats[key][stats_type] = torch.tensor(stats, dtype=torch.float32).numpy()
-        
-        datasets.append(dataset)
-    
-    if len(repo_ids) > 1:
-        logging.info(
-            f"Multiple datasets were provided: {repo_ids}"
-        )
+    # Create datasets using the helper
+    datasets = _create_datasets(
+        repo_ids=repo_ids,
+        root=root,
+        revision=revision,
+        episodes=episodes,
+        video_backend=video_backend,
+        action_delta_indices=action_delta_indices,
+        observation_delta_indices=observation_delta_indices,
+        use_imagenet_stats=use_imagenet_stats,
+    )
     
     # Wrap in WrappedRobotDataset with plugins
     wrapped_dataset = WrappedRobotDataset(
@@ -189,35 +245,4 @@ def make_dataset_without_config(
     )
     
     return wrapped_dataset
-
-def resolve_delta_timestamps_without_config(
-    ds_meta: LeRobotDatasetMetadata, action_delta_indices: List, observation_delta_indices: List = None
-) -> dict[str, list] | None:
-    """Resolves delta_timestamps from provided delta_indices parameters.
-
-    Args:
-        ds_meta (LeRobotDatasetMetadata): The dataset from which features and fps are used to build
-            delta_timestamps against.
-        action_delta_indices (List): Delta indices for actions
-        observation_delta_indices (List, optional): Delta indices for observations
-
-    Returns:
-        dict[str, list] | None: A dictionary of delta_timestamps, e.g.:
-            {
-                "observation.state": [-0.04, -0.02, 0]
-                "observation.action": [-0.02, 0, 0.02]
-            }
-            returns `None` if the the resulting dict is empty.
-    """
-    delta_timestamps = {}
-    for key in ds_meta.features:
-        if key == ACTION and action_delta_indices is not None:
-            delta_timestamps[key] = [i / ds_meta.fps for i in action_delta_indices]
-        if key.startswith("observation.") and observation_delta_indices is not None:
-            delta_timestamps[key] = [i / ds_meta.fps for i in observation_delta_indices]
-
-    if len(delta_timestamps) == 0:
-        delta_timestamps = None
-
-    return delta_timestamps
 

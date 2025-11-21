@@ -95,6 +95,30 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
             )
             self.disabled_features.update(extra_keys)
 
+        # Validate that common features have compatible shapes
+        for key in intersection_features:
+            shapes = []
+            for ds in self._datasets:
+                if key in ds.meta.features:
+                    feature_shape = ds.meta.features[key].get('shape', [])
+                    shapes.append(tuple(feature_shape))
+            
+            # Check if all shapes are the same
+            unique_shapes = set(shapes)
+            if len(unique_shapes) > 1:
+                shape_details = []
+                for ds in self._datasets:
+                    if key in ds.meta.features:
+                        shape = ds.meta.features[key].get('shape', [])
+                        shape_details.append(f"{ds.repo_id}: {shape}")
+                
+                raise ValueError(
+                    f"Incompatible shapes for feature '{key}' across datasets:\n" +
+                    "\n".join(f"  - {detail}" for detail in shape_details) +
+                    f"\n\nCannot mix datasets with different {key} dimensions. "
+                    f"This typically happens when mixing datasets from different robot configurations."
+                )
+
         # Keep backward compatible stats property
         self.stats = self._meta.stats
     
