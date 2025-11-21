@@ -1,3 +1,10 @@
+"""
+Inspect dataset loading, sampling, and distribution.
+
+Sample commands:
+  # Mixed v2.1 + v3.0 loading
+  python examples/inspect_dataset.py --config-path examples/configs/sampler_config.json
+"""
 import logging
 from pprint import pformat
 import argparse
@@ -54,6 +61,7 @@ def inspect(config_path: str):
     for i, d in enumerate(dataset._datasets):
         repo_id_map[i] = d.repo_id
         print(f"\n  - Dataset {i}: {d.repo_id}")
+        print(f"    - Type:     {type(d).__name__}")
         print(f"    - Episodes: {d.num_episodes}")
         print(f"    - Frames:   {d.num_frames}")
         total_episodes += d.num_episodes

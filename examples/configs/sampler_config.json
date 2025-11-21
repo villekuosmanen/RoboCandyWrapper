@@ -1,12 +1,11 @@
 {
   "type": "weighted",
   "dataset_weights": {
-    "villekuosmanen/dAgger_drop_footbag_into_dice_tower_1.4.0": 2.0,
-    "villekuosmanen/eval_dAgger_drop_footbag_into_dice_tower_1.7.0": 2.0
+    "imstevenpmwork/phone_final": 1.0,
+    "imstevenpmwork/doctest5": 3.0
   },
   "samples_per_epoch": null,
   "shuffle": true,
   "seed": 42,
   "replacement": true
 }
-
