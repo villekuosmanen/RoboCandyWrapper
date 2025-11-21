@@ -1,8 +1,52 @@
 # 🍬 RoboCandyWrapper
 
-🍬🍬🍬 Sweet wrappers for extending and remixing LeRobot Datasets 🍬🍬🍬
+**Sweet wrappers for extending and remixing LeRobot Datasets.**
 
-RoboCandyWrapper provides a system for backwards-compatible wrappers for extending and remixing LeRobotDatasets. The main features are:
+---
 
-1. Adapter system - enrich your LeRobotDatasets with additional labels and information without breaking backwards compatibility to the `main` branch of LeRobot and all other projects using it. Remix any combination of data adapters to maintain the single responsibility principle and clean code.
-2. Freely combine any number of datasets at runtime without having to merge them first, for easy multi-dataset training. Sample evenly across the datasets or over/underweigh specific datasets in your data mix using the samplers provided in the project.
+## Why do I need this?
+
+You have robot data. Lots of it. But it's messy:
+*   Some datasets are from the "old days" (LeRobot v2.1).
+*   Some are brand new (LeRobot v3.0).
+*   Some are missing data you need for your brand new idea.
+
+Traditionally, you'd have to write complex scripts to convert everything to a single format. **RoboCandyWrapper** handles that compatibility layer for you. It wraps your datasets in a sweet, consistent interface so you can focus on training, not data plumbing.
+
+## Quick Start (5 Minutes)
+
+### 1. Install
+```bash
+pip install robocandywrapper
+```
+
+### 2. The "Magic" Snippet
+Load a vintage v2.1 dataset and a modern v3.0 dataset as if they were the same thing.
+
+```python
+from robocandywrapper import make_dataset_without_config
+
+# Your playlist: one old, one new
+repo_ids = [
+    "lerobot/pusht_v2",      # v2.1 format
+    "lerobot/aloha_v3",      # v3.0 format
+]
+
+# The factory handles the compatibility logic automatically
+dataset = make_dataset_without_config(repo_ids)
+
+print(f"🎉 Successfully loaded {len(dataset)} episodes from mixed sources!")
+```
+
+## What more can I do with it?
+
+### 🎧 [The "Mix Tape" (Mixing Datasets)](docs/guide_mixing_datasets.md)
+Learn how to combine multiple datasets into one, handle different robot configurations, and use sampling weights to balance your data mix.
+
+### 🧂 [The "Flavor Enhancer" (Adding Data)](docs/guide_adding_data.md)
+Learn how to use **Adapters** to inject new data (like language instructions or quality scores) or fix shape mismatches without modifying your original files.
+
+## Deep Dive
+
+*   [**v2.1 vs v3.0 Compatibility:**](docs/v2_v3_format_comparison.md) Understanding the technical differences under the hood.
+*   **Legacy Support:** Note that `LegacyLeRobotDataset` relies on internal `lerobot` utilities. See the docs for details on version pinning.
