@@ -98,17 +98,28 @@ def _create_datasets(
     datasets = []
     
     for repo_id in repo_ids:
-        # Try loading as v3.0 first
+        # Load metadata first to check version
         try:
-            ds_meta = LeRobotDatasetMetadata(
-                repo_id, root=root, revision=revision
-            )
-            dataset_cls = LeRobotDataset
+            # Try loading metadata with the standard class first
+            ds_meta = LeRobotDatasetMetadata(repo_id, root=root, revision=revision)
+            # Check for version in multiple places
+            version = getattr(ds_meta, "codebase_version", None)
+            if version is None and hasattr(ds_meta, "info"):
+                version = ds_meta.info.get("codebase_version")
+            
+            # If version is missing or less than 3.0, treat as legacy
+            if version is None or packaging.version.parse(str(version)) < packaging.version.parse("3.0"):
+                logging.info(f"Detected legacy dataset version {version} for {repo_id}. Using LegacyLeRobotDataset.")
+                dataset_cls = LegacyLeRobotDataset
+                # Reload metadata with legacy class to be safe
+                ds_meta = LegacyLeRobotDatasetMetadata(repo_id, root=root, revision=revision)
+            else:
+                dataset_cls = LeRobotDataset
+
         except (BackwardCompatibilityError, NotImplementedError):
-            # use legacy loader
-            ds_meta = LegacyLeRobotDatasetMetadata(
-                repo_id, root=root, revision=revision
-            )
+            # Fallback for cases where standard metadata loading fails completely
+            logging.info(f"Standard metadata loading failed for {repo_id}. Falling back to LegacyLeRobotDataset.")
+            ds_meta = LegacyLeRobotDatasetMetadata(repo_id, root=root, revision=revision)
             dataset_cls = LegacyLeRobotDataset
 
         delta_timestamps = resolve_delta_timestamps(
