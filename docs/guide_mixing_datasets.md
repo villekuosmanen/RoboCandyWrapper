@@ -4,7 +4,7 @@ So you have a collection of datasets. Some are vintage v2.1 classics, others are
 
 In the past, this meant converting everything to a single format. With RoboCandyWrapper, you can just **mix and match**.
 
-## The Basics: Mixing v2.1 and v3.0
+## The Basics: Mixing v2.1 and v3.0 Datasets
 
 The `make_dataset_without_config` factory handles the compatibility logic for you. It automatically detects the version of each dataset and wraps it in the appropriate compatibility layer.
 
@@ -13,8 +13,8 @@ from robocandywrapper import make_dataset_without_config
 
 # Your playlist of datasets
 repo_ids = [
-    "lerobot/pusht_v2",      # v2.1 format dataset
-    "lerobot/aloha_v3",      # v3.0 format dataset
+    "lerobot/pusht_v2",      # v2.1 dataset
+    "lerobot/aloha_v3",      # v3.0 dataset
 ]
 
 # Create the mixed dataset

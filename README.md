@@ -7,8 +7,8 @@
 ## Why do I need this?
 
 You have robot data. Lots of it. But it's messy:
-*   Some datasets are from the "old days" (LeRobot v2.1).
-*   Some are brand new (LeRobot v3.0).
+*   Some datasets are from the "old days" (v2.1 dataset).
+*   Some are brand new (v3.0 dataset).
 *   Some are missing data you need for your brand new idea.
 
 Traditionally, you'd have to write complex scripts to convert everything to a single format. **RoboCandyWrapper** handles that compatibility layer for you. It wraps your datasets in a sweet, consistent interface so you can focus on training, not data plumbing.
@@ -28,8 +28,8 @@ from robocandywrapper import make_dataset_without_config
 
 # Your playlist: one old, one new
 repo_ids = [
-    "lerobot/pusht_v2",      # v2.1 format
-    "lerobot/aloha_v3",      # v3.0 format
+    "lerobot/pusht_v2",      # v2.1 dataset
+    "lerobot/aloha_v3",      # v3.0 dataset
 ]
 
 # The factory handles the compatibility logic automatically
