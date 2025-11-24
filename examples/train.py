@@ -13,9 +13,29 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+"""
+Train a policy on mixed LeRobot datasets (supports v2.1 and v3.0 formats).
+
+Quick Start:
+    # Train on mixed datasets with weighted sampling
+    python examples/train.py \
+      --sampler-config-path examples/configs/sampler_config.json \
+      --policy.type=act \
+      --policy.device=cuda \
+      --batch_size=8 \
+      --steps=100 \
+      --output_dir=outputs/test_run \
+      --wandb.enable=false
+"""
+import argparse
+import json
 import logging
+import os
+import sys
 import time
 from contextlib import nullcontext
+from pathlib import Path
 from pprint import pformat
 from typing import Any
 
@@ -32,7 +52,7 @@ from lerobot.optim.factory import make_optimizer_and_scheduler
 from lerobot.policies.factory import make_policy
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.utils import get_device_from_parameters
-from lerobot.scripts.eval import eval_policy
+from lerobot.rl.eval_policy import eval_policy
 from lerobot.utils.logging_utils import AverageMeter, MetricsTracker
 from lerobot.utils.random_utils import set_seed
 from lerobot.utils.train_utils import (
@@ -292,6 +312,54 @@ def train(cfg: TrainPipelineConfig):
 
 def main():
     init_logging()
+    
+    # Parse custom arguments for sampler config
+    custom_parser = argparse.ArgumentParser(add_help=False)
+    custom_parser.add_argument(
+        "--sampler-config-path",
+        type=str,
+        default=None,
+        help="Path to sampler configuration JSON file"
+    )
+    
+    # Parse known args to extract our custom ones
+    custom_args, remaining_args = custom_parser.parse_known_args()
+    
+    # Set environment variable and extract dataset repo_ids if sampler config is provided
+    if custom_args.sampler_config_path:
+        os.environ["SAMPLER_CONFIG_PATH"] = custom_args.sampler_config_path
+        logging.info(f"Using sampler config: {custom_args.sampler_config_path}")
+        
+        # Extract dataset repo_ids from sampler config
+        try:
+            config_path = Path(custom_args.sampler_config_path)
+            if config_path.exists():
+                with open(config_path, 'r') as f:
+                    sampler_data = json.load(f)
+                
+                # Extract repo_ids from dataset_weights keys
+                if 'dataset_weights' in sampler_data and sampler_data['dataset_weights']:
+                    repo_ids = list(sampler_data['dataset_weights'].keys())
+                    
+                    # Check if --dataset.repo_id is already in remaining_args
+                    has_repo_id = any('--dataset.repo_id' in arg for arg in remaining_args)
+                    
+                    if not has_repo_id:
+                        # Format as list and add to arguments
+                        repo_ids_str = f"[{','.join(repo_ids)}]"
+                        remaining_args.extend(['--dataset.repo_id', repo_ids_str])
+                        logging.info(f"Auto-detected datasets from sampler config: {repo_ids}")
+        except Exception as e:
+            logging.warning(f"Could not extract dataset repo_ids from sampler config: {e}")
+    
+    # Set default push_to_hub=false if not specified (to avoid requiring repo_id)
+    has_push_to_hub = any('--policy.push_to_hub' in arg for arg in remaining_args)
+    if not has_push_to_hub:
+        remaining_args.extend(['--policy.push_to_hub=false'])
+    
+    # Update sys.argv to only include remaining args for draccus
+    sys.argv = [sys.argv[0]] + remaining_args
+    
     train()
 
 

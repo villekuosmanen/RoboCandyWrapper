@@ -11,12 +11,12 @@ Main example configuration file with comments explaining each field.
 **Usage:**
 ```bash
 export SAMPLER_CONFIG_PATH=/path/to/RoboCandyWrapper/examples/configs/sampler_config.json
-python examples/train.py --config-name=your_train_config
+
+python examples/train.py --config-path=examples/configs/your_train_config.yaml
 ```
 
 **What it does:**
-- Oversamples `lerobot/pusht` dataset 2x
-- Undersamples `lerobot/aloha_sim_insertion` dataset 0.5x
+- Oversamples `villekuosmanen/dAgger_drop_footbag_into_dice_tower` datasets 2x
 - Uses deterministic sampling with seed 42
 
 ## Configuration Fields
@@ -101,7 +101,5 @@ Your JSON config will be validated when loaded. Common errors:
 
 ## See Also
 
-- [Full Sampler Documentation](../../docs/SAMPLERS.md)
-- [Example Usage Script](../sampler_usage_example.py)
 - [Training Script](../train.py)
 

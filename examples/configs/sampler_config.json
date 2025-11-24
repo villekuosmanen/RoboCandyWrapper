@@ -1,17 +1,11 @@
 {
   "type": "weighted",
   "dataset_weights": {
-    "villekuosmanen/dAgger_drop_footbag_into_dice_tower_1.0.0": 2.0,
-    "villekuosmanen/dAgger_drop_footbag_into_dice_tower_1.1.0": 2.0,
-    "villekuosmanen/dAgger_drop_footbag_into_dice_tower_1.2.0": 2.0,
-    "villekuosmanen/dAgger_drop_footbag_into_dice_tower_1.3.0": 2.0,
-    "villekuosmanen/dAgger_drop_footbag_into_dice_tower_1.4.0": 2.0,
-    "villekuosmanen/dAgger_drop_footbag_into_dice_tower_1.5.0": 2.0,
-    "villekuosmanen/dAgger_drop_footbag_into_dice_tower_1.6.0": 2.0
+    "lerobot/svla_so100_pickplace": 1.0,
+    "lerobot/svla_so100_stacking": 3.0
   },
   "samples_per_epoch": null,
   "shuffle": true,
   "seed": 42,
   "replacement": true
 }
-

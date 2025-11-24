@@ -9,7 +9,7 @@ from typing import Optional
 
 from glob import glob
 from huggingface_hub.constants import SAFETENSORS_SINGLE_FILE
-from lerobot.constants import PRETRAINED_MODEL_DIR
+from lerobot.utils.constants import PRETRAINED_MODEL_DIR
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.configs.train import TrainPipelineConfig
 from lerobot.configs.types import FeatureType
