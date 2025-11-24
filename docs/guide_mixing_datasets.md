@@ -42,7 +42,7 @@ dataset = make_dataset_without_config(
 
 ### Different Episodes Per Dataset
 
-For more control, you can specify different episodes for each dataset using a dictionary:
+For more control, you can specify different episodes for each dataset using a dictionary. This is fully supported across both Legacy (v2.1) and new LeRobot (v3.0) datasets.
 
 ```python
 # Select different episodes from each dataset

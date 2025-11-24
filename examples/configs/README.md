@@ -33,6 +33,11 @@ python examples/train.py --config-path=examples/configs/your_train_config.yaml
   - Unlisted datasets get weight 1.0
   - **Default:** `null` (uniform sampling)
 
+- **`episodes`** (object or null): Maps dataset repo IDs to list of episode indices
+  - Filters datasets to only include specified episodes
+  - Useful for train/val splits
+  - **Default:** `null` (load all episodes)
+
 - **`samples_per_epoch`** (integer or null): Total samples per epoch
   - **Default:** `null` (uses sum of dataset lengths)
 
@@ -87,6 +92,20 @@ python examples/train.py --config-path=examples/configs/your_train_config.yaml
     "new_dataset_v3": 2.0
   },
   "seed": 42
+}
+```
+
+### Episode Selection (Train/Val Split)
+
+```json
+{
+  "type": "weighted",
+  "dataset_weights": {
+    "dataset_a": 1.0
+  },
+  "episodes": {
+    "dataset_a": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  }
 }
 ```
 

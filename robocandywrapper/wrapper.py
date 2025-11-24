@@ -1,4 +1,5 @@
 import datasets
+import bisect
 import logging
 from typing import Any, Callable, Optional, Sequence, Union
 import warnings
@@ -43,7 +44,20 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
         self.error_on_key_conflicts = error_on_key_conflicts
         
         # Calculate dataset boundaries for flat index space
-        self._dataset_lengths = [len(dataset) for dataset in self._datasets]
+        self._dataset_lengths = []
+        self._index_maps = [] # List of (list[int] | None)
+        
+        for dataset in self._datasets:
+            # Get valid indices for the dataset
+            valid_indices = self._get_valid_indices(dataset)
+            self._index_maps.append(valid_indices)
+            
+            if valid_indices is not None:
+                self._dataset_lengths.append(len(valid_indices))
+            else:
+                self._dataset_lengths.append(len(dataset))
+
+        # Calculate cumulative lengths
         self._cumulative_lengths = [0]
         for length in self._dataset_lengths:
             self._cumulative_lengths.append(self._cumulative_lengths[-1] + length)
@@ -207,7 +221,7 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
     @property
     def num_frames(self) -> int:
         """Number of samples/frames."""
-        return sum(d.num_frames for d in self._datasets)
+        return sum(len(d) for d in self._datasets)
 
     @property
     def num_episodes(self) -> int:
@@ -346,6 +360,38 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
         # Re-validate keys
         self._validate_plugin_keys()
     
+    def _get_valid_indices(self, dataset) -> list[int] | None:
+        """
+        Returns a list of valid frame indices for the given dataset based on its selected episodes.
+        Returns None if no filtering is needed (all indices valid).
+        """
+        if not hasattr(dataset, 'episodes') or dataset.episodes is None:
+            return None
+            
+        # If the dataset already correctly reports filtered length (like LegacyLeRobotDataset),
+        # we don't need to do manual mapping (assuming it handles getitem correctly too)
+        total_frames_meta = dataset.meta.total_frames
+        if len(dataset) < total_frames_meta:
+            return None
+            
+        # Calculate valid indices for LeRobotDataset (v3.0) which loads everything
+        valid_indices = []
+        episodes_meta = dataset.meta.episodes
+        
+        for ep_idx in dataset.episodes:
+            ep_info = episodes_meta[ep_idx]
+                
+            # Get range of frames for this episode
+            start = ep_info.get("dataset_from_index")
+            end = ep_info.get("dataset_to_index")
+            
+            if start is None or end is None:
+                 continue
+                 
+            valid_indices.extend(range(start, end))
+            
+        return valid_indices
+
     def __getitem__(self, idx: int) -> dict:
         """
         Get item with plugin transformations applied sequentially.
@@ -358,19 +404,23 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
         
         # Determine which dataset to get an item from based on the index
         dataset_idx = 0
-        for i, cumulative_length in enumerate(self._cumulative_lengths[1:]):
-            if idx >= cumulative_length:
-                dataset_idx = i + 1
-            else:
-                break
-        
+        # Use bisect to find the right interval for efficiency
+        dataset_idx = bisect.bisect_right(self._cumulative_lengths, idx) - 1
+        if dataset_idx < 0: dataset_idx = 0 # Should not happen if idx >= 0
+
         # Get local index within the dataset
         local_idx = idx - self._cumulative_lengths[dataset_idx]
         dataset = self._datasets[dataset_idx]
         
-        # Get base item from dataset
-        item = dict(dataset[local_idx])
-        episode_idx = item["episode_index"].item()
+        # Get base item from dataset (with episode filtering support)
+        if self._index_maps[dataset_idx] is not None:
+            # Map virtual index to real dataset index
+            real_idx = self._index_maps[dataset_idx][local_idx]
+            base_item = dataset[real_idx]
+        else:
+            base_item = dataset[local_idx]
+
+        episode_idx = base_item["episode_index"].item()
         
         # Add dataset index
         item["dataset_index"] = torch.tensor(dataset_idx)

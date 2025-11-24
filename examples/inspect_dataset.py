@@ -2,7 +2,7 @@
 Inspect dataset loading, sampling, and distribution.
 
 Sample commands:
-  # Mixed v2.1 + v3.0 loading
+  # Mixed v2.1 + v3.0 loading (episode selection defined in config file)
   python examples/inspect_dataset.py --config-path examples/configs/sampler_config.json
 """
 import logging
@@ -24,10 +24,21 @@ def inspect(config_path: str):
     """
     Loads datasets, applies sampling logic from a config file,
     and inspects the results. Also provides a placeholder for plugins.
+
+    Args:
+        config_path: Path to the sampler config file
     """
     logging.info(f"Loading config: {config_path}")
     with open(config_path, "r") as f:
         config = json.load(f)
+
+    # Parse episodes from config
+    episodes_parsed = config.get("episodes")
+
+    if episodes_parsed is not None:
+        logging.info(f"Using episode selection: {episodes_parsed}")
+    else:
+        logging.info("Loading all episodes (no episode selection)")
 
     # --- 1. Dataset Creation ---
     # The config file for the sampler is now the source of truth
@@ -38,7 +49,7 @@ def inspect(config_path: str):
         logging.error("Config must contain 'dataset_weights' mapping repo IDs to weights.")
         return
 
-    dataset = make_dataset_without_config(repo_ids)
+    dataset = make_dataset_without_config(repo_ids, episodes=episodes_parsed)
     logging.info("Dataset object created successfully.")
 
     # --- 2. Plugin Loading (Placeholder) ---
@@ -60,12 +71,15 @@ def inspect(config_path: str):
     repo_id_map = {}
     for i, d in enumerate(dataset._datasets):
         repo_id_map[i] = d.repo_id
+        # Use filtered length from wrapper if available
+        real_num_frames = dataset._dataset_lengths[i]
+        
         print(f"\n  - Dataset {i}: {d.repo_id}")
         print(f"    - Type:     {type(d).__name__}")
         print(f"    - Episodes: {d.num_episodes}")
-        print(f"    - Frames:   {d.num_frames}")
+        print(f"    - Frames:   {real_num_frames}")
         total_episodes += d.num_episodes
-        total_frames += d.num_frames
+        total_frames += real_num_frames
 
     print("\n" + colored("Unweighted Totals:", "yellow"))
     print(f"  - Total Episodes: {total_episodes}")
@@ -121,7 +135,9 @@ def inspect(config_path: str):
     total_effective_size = 0
     for i, d in enumerate(dataset._datasets):
         weight = dataset_weights.get(d.repo_id, 1.0)
-        effective_size = d.num_frames * weight
+        # Use filtered length from wrapper
+        real_num_frames = dataset._dataset_lengths[i]
+        effective_size = real_num_frames * weight
         effective_sizes[i] = effective_size
         total_effective_size += effective_size
         
@@ -129,10 +145,12 @@ def inspect(config_path: str):
         for i, d in enumerate(dataset._datasets):
             repo_id = d.repo_id
             weight = dataset_weights.get(repo_id, 1.0)
+            # Use filtered length from wrapper
+            real_num_frames = dataset._dataset_lengths[i]
             effective_size = effective_sizes.get(i, 0)
             percentage = (effective_size / total_effective_size) * 100
             print(f"  - Dataset {i} ({repo_id}):")
-            print(f"    - Frames: {d.num_frames}, Weight: {weight} -> Effective Size: {effective_size:.0f} (~{percentage:.2f}%)")
+            print(f"    - Frames: {real_num_frames}, Weight: {weight} -> Effective Size: {effective_size:.0f} (~{percentage:.2f}%)")
 
 
 
