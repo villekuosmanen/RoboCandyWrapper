@@ -171,7 +171,7 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
         # Add plugin features (from metadata view)
         # Note: These may not have full type info, but they'll be available
         for key in self._meta.features:
-            if key not in features and key not in self.disabled_features:
+            if key not in features:
                 # Plugin feature - will be inferred from actual data
                 features[key] = self._meta.features[key]
         
@@ -262,7 +262,11 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
         self.stats = self._meta.stats
 
     def _validate_plugin_keys(self):
-        """Check for key conflicts between plugins."""
+        """
+        Check for key conflicts between plugins.
+        
+        With sequential execution, later plugins override earlier ones.
+        """
         for dataset_idx, dataset_plugins in enumerate(self._plugin_instances):
             key_to_plugins: dict[str, list[tuple[int, PluginInstance]]] = {}
             
@@ -276,18 +280,19 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
             # Check for conflicts
             for key, plugins_with_key in key_to_plugins.items():
                 if len(plugins_with_key) > 1:
-                    # Sort by priority to show which plugin will win
-                    sorted_plugins = sorted(plugins_with_key, key=lambda x: x[1].priority())
+                    # With sequential execution, last plugin wins
                     plugin_names = [
-                        f"{type(p).__name__} (priority={p.priority():08x})"
-                        for _, p in sorted_plugins
+                        f"{type(p).__name__} (position {idx})"
+                        for idx, p in plugins_with_key
                     ]
-                    winner = type(sorted_plugins[0][1]).__name__
+                    winner_idx, winner_instance = plugins_with_key[-1]
+                    winner = type(winner_instance).__name__
+                    
                     msg = (
                         f"Key conflict for '{key}' in dataset {dataset_idx} "
                         f"({self._datasets[dataset_idx].repo_id}): "
                         f"multiple plugins provide this key: {plugin_names}. "
-                        f"Plugin '{winner}' will be used (lowest hash-based priority)."
+                        f"Plugin '{winner}' (last in order) will be used."
                     )
                     
                     if self.error_on_key_conflicts:
@@ -345,10 +350,10 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
     
     def __getitem__(self, idx: int) -> dict:
         """
-        Get item with plugin transformations applied in isolation.
+        Get item with plugin transformations applied sequentially.
         
-        Each plugin gets the original item and returns its own data.
-        Results are then merged with conflict resolution.
+        Plugins execute in order, and each plugin can access data added
+        by previous plugins in the chain.
         """
         if idx >= len(self):
             raise IndexError(f"Index {idx} out of bounds.")
@@ -366,26 +371,26 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
         dataset = self._datasets[dataset_idx]
         
         # Get base item from dataset
-        base_item = dataset[local_idx]
-        episode_idx = base_item["episode_index"].item()
+        item = dict(dataset[local_idx])
+        episode_idx = item["episode_index"].item()
         
         # Add dataset index
-        base_item["dataset_index"] = torch.tensor(dataset_idx)
+        item["dataset_index"] = torch.tensor(dataset_idx)
         
-        # Collect plugin data in isolation
-        plugin_data: dict[str, list[tuple[Any, int, PluginInstance]]] = {}
+        # Remove disabled features
+        for data_key in self.disabled_features:
+            if data_key in item:
+                del item[data_key]
         
+        # Execute plugins sequentially, passing accumulated data
         for plugin_instance in self._plugin_instances[dataset_idx]:
-            # Each plugin sees only the base item, not other plugins' outputs
             try:
-                plugin_item = plugin_instance.get_item_data(local_idx, episode_idx)
+                # Pass current accumulated data to the plugin
+                plugin_data = plugin_instance.get_item_data(local_idx, episode_idx, item)
                 
-                # Collect data with priority info
-                priority = plugin_instance.priority()
-                for key, value in plugin_item.items():
-                    if key not in plugin_data:
-                        plugin_data[key] = []
-                    plugin_data[key].append((value, priority, plugin_instance))
+                # Merge plugin data into accumulated item
+                if plugin_data:
+                    item.update(plugin_data)
                     
             except Exception as e:
                 warnings.warn(
@@ -393,31 +398,14 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
                     UserWarning
                 )
         
-        # Merge plugin data with conflict resolution
-        final_item = dict(base_item)  # Start with base item
-        
-        for key, values_with_priority in plugin_data.items():
-            if len(values_with_priority) == 1:
-                # No conflict, use the value
-                final_item[key] = values_with_priority[0][0]
-            else:
-                # Conflict: use value from plugin with lowest priority number
-                values_with_priority.sort(key=lambda x: x[1])  # Sort by priority
-                final_item[key] = values_with_priority[0][0]
-                
-                # Could optionally warn here too, but we already warned in init
-        
-        for data_key in self.disabled_features:
-            if data_key in final_item:
-                del final_item[data_key]
 
         # Apply image transforms if provided
         if self.image_transforms is not None:
             for cam_key in dataset.meta.camera_keys:
-                if cam_key in final_item:
-                    final_item[cam_key] = self.image_transforms(final_item[cam_key])
+                if cam_key in item:
+                    item[cam_key] = self.image_transforms(item[cam_key])
         
-        return final_item
+        return item
     
     def __repr__(self):
         plugin_names = [type(p).__name__ for p in self._plugins]

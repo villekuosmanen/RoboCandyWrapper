@@ -1,18 +1,18 @@
 """Plugin implementations for RoboCandyWrapper."""
 
 from robocandywrapper.plugins.affordance import (
-    LabelledAffordancesPlugin,
-    AffordancesInstance,
+    LabelledAffordancePlugin,
+    AffordanceInstance,
 )
-from robocandywrapper.plugins.denserewards import (
-    DenseRewardsPlugin,
-    DenseRewardsInstance,
+from robocandywrapper.plugins.episode_outcome import (
+    EpisodeOutcomePlugin,
+    EpisodeOutcomeInstance,
 )
 
 __all__ = [
-    "LabelledAffordancesPlugin",
-    "AffordancesInstance",
-    "DenseRewardsPlugin",
-    "DenseRewardsInstance",
+    "LabelledAffordancePlugin",
+    "AffordanceInstance",
+    "EpisodeOutcomePlugin",
+    "EpisodeOutcomeInstance",
 ]
 

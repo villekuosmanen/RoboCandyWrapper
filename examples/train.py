@@ -46,7 +46,6 @@ from torch.optim import Optimizer
 
 from lerobot.configs import parser
 from lerobot.configs.train import TrainPipelineConfig
-from lerobot.datasets.sampler import EpisodeAwareSampler
 from lerobot.datasets.utils import cycle
 from lerobot.envs.factory import make_env
 from lerobot.optim.factory import make_optimizer_and_scheduler

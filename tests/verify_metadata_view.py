@@ -76,9 +76,6 @@ class MockPluginInstance:
     def get_item_data(self, idx, episode_idx):
         return {key: None for key in self._keys}
     
-    def priority(self):
-        return 0
-    
     def detach(self):
         pass
 
