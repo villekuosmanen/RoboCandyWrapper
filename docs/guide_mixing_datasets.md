@@ -26,7 +26,13 @@ print(f"Total episodes: {len(dataset)}")
 
 ## Selecting Specific Episodes
 
-Sometimes you don't need *all* the episodes from a dataset. Maybe you want to use only the first 10 episodes for quick testing, or select different episodes from each dataset in your mix.
+Only using a part of your dataset in model training can be useful in many scenarios, such as the following.
+
+- Reserving specific episodes as validation data, or as a held-out test set 
+- Comparing model performance whjen trained on a subset of all data
+- Dropping specific episodes (e.g. failed trajectores) without having to edit the dataset first
+
+`RoboCandyWrapper` allows fine-grained control of what episodes to train on across the data mix.
 
 ### Same Episodes for All Datasets
 

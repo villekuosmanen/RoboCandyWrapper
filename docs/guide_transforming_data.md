@@ -1,81 +1,57 @@
 # Guide: The "Flavor Enhancer" (Transforming Data)
 
-Sometimes your dataset is *almost* perfect, but it needs some tweaks. Maybe you need to add a "language_instruction" field, reshape tensors to match other datasets, or modify existing data on-the-fly.
+As a researcher, the models you train are only as good as our data. While the LeRobot data format already contains many common columns, sometimes we want to enrich it with extra information, either at episode or frame level. This might include:
 
-Traditionally, you'd have to rewrite the entire dataset. With RoboCandyWrapper, you can use **plugins** to transform your data as it's loaded.
+- Subtask language instructions
+- Episode outcome information
+- Labelled affordance location or label
+- Anything you want to include in your model training!
 
-## The Concept: Plugins
+We can edit the LeRobotDataset class directly to include this data, but this creates two major issues:
 
-Plugins allow you to modify the data on-the-fly as it is loaded. The underlying data files remain unchanged, but the Plugin intercepts the data loading process to inject or modify fields before they reach your training code.
+1. Your Dataset code diverges from the LeRobot code in `main` - in order to use the new columns, users are forever tied to your data class.
+2. The data loading and access code in LeRobotDataset doesn't always handle unexpected data well, and could cause issues. In the worst case, your dataset is in effect corrupted, and impossible to load using the base LeRobot class, potentially requiring migration scripts and complex data engineering to revert the changes in the future. I've seen issues like this happen when adding the following data:
+    
+    - Sparse data, that only exists for certain episodes or frames in a dataset.
+    - Lists of strings, as some data processing code expects to convert them to tensors.
 
-You can use multiple plugins together - they all operate on the original dataset item and their outputs are merged into the final result.
+## The Solution: Plugins
 
-## Example: Adding Language Instructions
+Plugins hook the datasets at runtime, and enrich frames accessed via the `__getitem__` method of your dataset with additional columns. These columns can be loaded from the LeRobotDataset's repository if they are written to disk, or they can be runtime-only, either pre-calculated when lading the dataset, lazily initialised, or calculated on the fly.
 
-Let's say you have a dataset of a robot picking up a cup, but it has no text description. You want to inject the string "pick up the cup" into every frame.
+### Example - Episode Outcome Plugin.
 
-### 1. Define the Plugin
+When evaluating policies, or when training them with reinforcement learning under sparse rewards, we need to know whether an episode was a success or not. This data can be included in LeRobotDatasets using the [Episode Outcome Plugin](robocandywrapper/plugins/episode_outcome.py).
 
-Create a class that inherits from `DatasetPlugin`.
+We can label episode outcomes using the [labeling script](examples/label_episode_outcomes.py), which marks episodes as success or failure based on the file containing the labels (a human will have to provide this information).
 
-```python
-from robocandywrapper import DatasetPlugin, PluginInstance
-import torch
-
-class LanguageInstructionPlugin(DatasetPlugin):
-    def __init__(self, dataset, instruction: str):
-        super().__init__(dataset)
-        self.instruction = instruction
-
-    def __getitem__(self, idx):
-        # 1. Get the original data
-        item = self.dataset[idx]
-        
-        # 2. Add our new flavor
-        item["language_instruction"] = self.instruction
-        
-        return item
+We can then load the plugin during the creation of the dataset.
 ```
-
-### 2. Apply the Plugin
-
-Now you can apply this plugin to any dataset, regardless of its version.
-
-```python
 from robocandywrapper import make_dataset_without_config
 
-# Load the base dataset with the plugin
-dataset = make_dataset_without_config(
-    ["lerobot/svla_so100_pickplace"],
-    plugins=[LanguageInstructionPlugin("pick up the red block")]
-)
-
-# Verify
-sample = enhanced_dataset[0]
-print(sample["language_instruction"]) 
-# > "pick up the red block"
+dataset = make_dataset_without_config(repo_id, plugins=[EpisodeOutcomePlugin()])
 ```
 
-## Advanced: Modifying Existing Data
+We can then access the episode outcome as boolean tensors using the `episode_outcome` and `episode_outcome_mask` columns items loaded from our `DataLoader`. From the data consumer's perspective, they look the same as columns coming from `LeRobotDataset` directly.
 
-Plugins aren't just for adding new keys; they can also modify existing ones. This is useful for **fixing shape mismatches**.
+### Storing data on disk
 
-For example, if you need to pad a 6-DOF action to 7-DOF to mix it with another dataset:
+The Episode Outcome plugin stores the outcome labels in the same Hugging Face repository your LeRobot data is stored (or on disk, if you are not uploading your data to Hugging Face). This means you only need to label the episode outcomes once.
 
-```python
-class PadActionPlugin(DatasetPlugin):
-    def __getitem__(self, idx):
-        item = self.dataset[idx]
-        
-        # Pad the 6th dimension to 7
-        original_action = item["action"] # Shape (6,)
-        padded_action = torch.cat([original_action, torch.zeros(1)])
-        
-        item["action"] = padded_action
-        return item
+Most importantly, the labels are stored in the `candywrapper_plugins/episode_outcome` directory, fully isolated from the directories where LeRobot stores its data. This ensures modifications made by RoboCandyWrapper do not impact loading the dataset into "vanilla" LeRobot, preserving backwards compatibility.
+
+**`candywrapper_plugins/<your_plugin>` is the recommended best practice location format for writing data into in custom Plugin classes, to ensure data is isolated (with best efforts) between different plugins.** This is just a convention though - the library doesn't enforce any particular location or data format.
+
+### Mixing multiple plugins
+
+The Plugin architecture is designed for composability - the framework allows loading in as many plugins as you want. This allows isolating data experiments from each other, allowing researchers to only load the plugins they need for each one.
+
+Data is passed between Plugins using a *daisy chain* system. This means we can define plugins that depend on data from other plugins! For example, we can define `YourPlugin` that depends on the `episode_outcome` and `episode_outcome_mask` columns exposed by the `EpisodeOutcomePlugin`. To use this, simply ensure `EpisodeOutcomePlugin` is loaded first:
+
+```
+from robocandywrapper import make_dataset_without_config
+
+dataset = make_dataset_without_config(repo_id, plugins=[EpisodeOutcomePlugin(), YourPlugin()])
 ```
 
-## Best Practices
-
-*   **Keep it Lightweight:** Plugins run on-the-fly. Avoid heavy computation in `get_item_data`.
-*   **Multiple Plugins:** You can apply multiple plugins together: `[PadActionPlugin(), LanguageInstructionPlugin()]`. They all operate on the original dataset item and their outputs are merged.
+Ordering of plugins matters - EpisodeOutcomePlugin needs to be loaded before YourPlugin for the daisy chaining of plugins to work. Flip the order and `YourPlugin` won't see the `episode_outcome` and `episode_outcome_mask` fields.

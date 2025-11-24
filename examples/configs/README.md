@@ -16,7 +16,7 @@ python examples/train.py --config-path=examples/configs/your_train_config.yaml
 ```
 
 **What it does:**
-- Oversamples `villekuosmanen/dAgger_drop_footbag_into_dice_tower` datasets 2x
+- Oversamples `lerobot/svla_so100_stacking` datasets 3x
 - Uses deterministic sampling with seed 42
 
 ## Configuration Fields

@@ -27,6 +27,16 @@ Quick Start:
       --steps=100 \
       --output_dir=outputs/test_run \
       --wandb.enable=false
+
+    # Train using multiple datasets directly from the command line
+    python examples/train.py \
+        --dataset.repo_id=[lerobot/svla_so100_pickplace, lerobot/svla_so100_stacking] \
+        --policy.type=act \
+        --policy.device=cuda \
+        --batch_size=8 \
+        --steps=100 \
+        --output_dir=outputs/test_run \
+        --wandb.enable=false
 """
 import argparse
 import json
