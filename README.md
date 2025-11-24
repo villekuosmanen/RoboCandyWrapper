@@ -2,6 +2,11 @@
 
 **Sweet wrappers for extending and remixing LeRobot Datasets.**
 
+[![PyPI version](https://badge.fury.io/py/robocandywrapper.svg)](https://badge.fury.io/py/robocandywrapper)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![GitHub stars](https://img.shields.io/github/stars/villekuosmanen/RoboCandyWrapper.svg?style=social&label=Star)](https://github.com/villekuosmanen/RoboCandyWrapper)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+
 ---
 
 ## 🍬 Why do I need this?
