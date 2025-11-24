@@ -3,8 +3,6 @@ import logging
 from typing import Any, Callable, Optional, Sequence, Union
 import warnings
 
-from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
-from lerobot.datasets.compute_stats import aggregate_stats
 from lerobot.datasets.video_utils import VideoFrame
 import torch
 
@@ -17,7 +15,7 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
     
     def __init__(
         self,
-        datasets: Union['LeRobotDataset', Sequence['LeRobotDataset']],
+        datasets: Union[Any, Sequence[Any]],
         plugins: Optional[list[DatasetPlugin]] = None,
         image_transforms: Optional[Callable] = None,
         warn_on_key_conflicts: bool = True,

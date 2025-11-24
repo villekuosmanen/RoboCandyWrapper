@@ -17,10 +17,8 @@ from lerobot.utils.constants import ACTION, REWARD
 
 from robocandywrapper.wrapper import WrappedRobotDataset
 from robocandywrapper import DatasetPlugin
-from robocandywrapper.datasets.legacy_dataset import LegacyLeRobotDataset, LegacyLeRobotDatasetMetadata
+from robocandywrapper.dataformats.lerobot_21 import LeRobot21Dataset, LeRobot21DatasetMetadata
 
-# Version threshold for legacy dataset detection
-LEGACY_VERSION_THRESHOLD = packaging.version.parse("2.1")
 
 def _indices_to_times(indices: List, fps: float) -> List[float]:
     """Helper to convert frame indices to time offsets."""
@@ -78,7 +76,7 @@ def _create_datasets(
     observation_delta_indices: Optional[List] = None,
     reward_delta_indices: Optional[List] = None,
     use_imagenet_stats: bool = True,
-) -> List[LeRobotDataset | LegacyLeRobotDataset]:
+) -> List[LeRobotDataset | LeRobot21Dataset]:
     """Private helper to create dataset instances from a list of repo IDs.
     
     Args:
@@ -109,18 +107,18 @@ def _create_datasets(
             
             # If version is missing or less than 3.0, treat as legacy
             if version is None or packaging.version.parse(str(version)) < packaging.version.parse("3.0"):
-                logging.info(f"Detected legacy dataset version {version} for {repo_id}. Using LegacyLeRobotDataset.")
-                dataset_cls = LegacyLeRobotDataset
+                logging.info(f"Detected legacy dataset version {version} for {repo_id}. Using LeRobot21Dataset.")
+                dataset_cls = LeRobot21Dataset
                 # Reload metadata with legacy class to be safe
-                ds_meta = LegacyLeRobotDatasetMetadata(repo_id, root=root, revision=revision)
+                ds_meta = LeRobot21DatasetMetadata(repo_id, root=root, revision=revision)
             else:
                 dataset_cls = LeRobotDataset
 
         except (BackwardCompatibilityError, NotImplementedError):
             # Fallback for cases where standard metadata loading fails completely
-            logging.info(f"Standard metadata loading failed for {repo_id}. Falling back to LegacyLeRobotDataset.")
-            ds_meta = LegacyLeRobotDatasetMetadata(repo_id, root=root, revision=revision)
-            dataset_cls = LegacyLeRobotDataset
+            logging.info(f"Standard metadata loading failed for {repo_id}. Falling back to LeRobot21Dataset.")
+            ds_meta = LeRobot21DatasetMetadata(repo_id, root=root, revision=revision)
+            dataset_cls = LeRobot21Dataset
 
         delta_timestamps = resolve_delta_timestamps(
             ds_meta,

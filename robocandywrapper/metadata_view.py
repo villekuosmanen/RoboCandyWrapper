@@ -5,8 +5,6 @@ import logging
 from typing import Optional
 
 import numpy as np
-from lerobot.datasets.lerobot_dataset import LeRobotDatasetMetadata
-from lerobot.datasets.compute_stats import aggregate_stats
 
 
 def aggregate_stats_weighted(
