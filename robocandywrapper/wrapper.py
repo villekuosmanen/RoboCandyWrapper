@@ -147,7 +147,7 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
         # Add plugin features (from metadata view)
         # Note: These may not have full type info, but they'll be available
         for key in self._meta.features:
-            if key not in features and key not in self.disabled_features:
+            if key not in features:
                 # Plugin feature - will be inferred from actual data
                 features[key] = self._meta.features[key]
         
@@ -353,6 +353,11 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
         # Add dataset index
         item["dataset_index"] = torch.tensor(dataset_idx)
         
+        # Remove disabled features
+        for data_key in self.disabled_features:
+            if data_key in item:
+                del item[data_key]
+        
         # Execute plugins sequentially, passing accumulated data
         for plugin_instance in self._plugin_instances[dataset_idx]:
             try:
@@ -369,10 +374,6 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
                     UserWarning
                 )
         
-        # Remove disabled features
-        for data_key in self.disabled_features:
-            if data_key in item:
-                del item[data_key]
 
         # Apply image transforms if provided
         if self.image_transforms is not None:
