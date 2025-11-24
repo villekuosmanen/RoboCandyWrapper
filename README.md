@@ -4,7 +4,7 @@
 
 ---
 
-## Why do I need this?
+## 🍬 Why do I need this?
 
 You have robot data. Lots of it. But it's messy:
 *   Some datasets are from the "old days" (v2.1 dataset).
@@ -17,7 +17,9 @@ Additionally, you might want to extend your datasets with additional labels and 
 
 RoboCandyWrapper also includes a **Sampler** system to change the ratio of sampling between multiple data sources, so you can increase or decrease the weight of specific datasets in your data mix as needed.
 
-## Quick Start (5 Minutes)
+RoboCandyWrapper is still experimental so do note that the library API could change in the future although we'll do our best to avoid unnecessary changes!
+
+## 🍬 Quick Start (5 Minutes)
 
 ### Installation
 ```bash
@@ -54,10 +56,15 @@ dataset = make_dataset_without_config(repo_ids)
 print(f"🎉 Successfully loaded {len(dataset)} episodes from mixed sources!")
 ```
 
-## What more can I do with it?
+## 🍬 What more can I do with it?
 
 ### 🎧 [The "Mix Tape" (Mixing Datasets)](docs/guide_mixing_datasets.md)
 Learn how to combine multiple datasets into one, handle different robot configurations, and use sampling weights to balance your data mix.
 
 ### 🧂 [The "Flavor Enhancer" (Transforming Data)](docs/guide_transforming_data.md)
 Learn how to use **Plugins** to add new labels or columns to your dataset, reshape tensors, or modify existing data on-the-fly without breaking backwards compatability.
+
+## Other cool stuff from the authors
+
+1. [Physical AI Interpretability](https://github.com/villekuosmanen/physical-AI-interpretability) offers open-source interpretability tools for AI robotics.  
+2. [RewACT](https://github.com/villekuosmanen/rewACT) is an open-source reward model / value function based on the ACT transformer architecture.
