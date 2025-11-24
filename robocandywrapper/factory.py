@@ -103,14 +103,14 @@ def _create_datasets(
         invalid_keys = set(episodes.keys()) - set(repo_ids)
         if invalid_keys:
             logging.warning(
-                f"Episode selection dictionary contains keys that do not match any dataset repo_ids: {invalid_keys}",
-                f"These keys will be ignored. Available repo_ids: {repo_ids}",
+                f"Episode selection dictionary contains keys that do not match any dataset repo_ids: {invalid_keys}. "
+                f"These keys will be ignored. Available repo_ids: {repo_ids}"
             )
         # Check for repo_ids that don't have episodes specified
         missing_repo_ids = set(repo_ids) - set(episodes.keys())
         if missing_repo_ids:
             logging.warning(
-                f"Repo IDs without episode selection (will load all episodes): {missing_repo_ids}",
+                f"Repo IDs without episode selection (will load all episodes): {missing_repo_ids}"
             )
     
     for repo_id in repo_ids:

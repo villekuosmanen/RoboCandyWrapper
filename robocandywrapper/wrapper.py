@@ -416,11 +416,11 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
         if self._index_maps[dataset_idx] is not None:
             # Map virtual index to real dataset index
             real_idx = self._index_maps[dataset_idx][local_idx]
-            base_item = dataset[real_idx]
+            item = dataset[real_idx]
         else:
-            base_item = dataset[local_idx]
+            item = dataset[local_idx]
 
-        episode_idx = base_item["episode_index"].item()
+        episode_idx = item["episode_index"].item()
         
         # Add dataset index
         item["dataset_index"] = torch.tensor(dataset_idx)

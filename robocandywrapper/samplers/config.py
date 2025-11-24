@@ -16,6 +16,11 @@ class SamplerConfig:
                         Example: Dataset with 1000 frames and weight 2.0 has effective size 2000.
                         Datasets not in dict get weight 1.0 (original size).
                         Example: {"lerobot/pusht": 2.0, "lerobot/aloha": 0.5}
+        episodes: Episode selection per dataset. Can be:
+                 - None: Load all episodes from all datasets
+                 - list[int]: Load these episodes from ALL datasets
+                 - dict[str, list[int]]: Load specific episodes per dataset
+                 Example: {"lerobot/pusht": [0, 1, 2], "lerobot/aloha": [5, 6, 7]}
         samples_per_epoch: Total samples per epoch. If None, uses sum of dataset lengths.
         shuffle: Whether to shuffle the combined samples after weighted sampling
         seed: Random seed for reproducibility. If None, sampling is non-deterministic.
@@ -23,6 +28,7 @@ class SamplerConfig:
     """
     type: str = "weighted"
     dataset_weights: Optional[dict[str, float]] = None
+    episodes: Optional[list[int] | dict[str, list[int]]] = None
     samples_per_epoch: Optional[int] = None
     shuffle: bool = True
     seed: Optional[int] = None
@@ -79,9 +85,33 @@ class SamplerConfig:
         if not isinstance(replacement, bool):
             raise ValueError(f"replacement must be a bool, got {type(replacement)}")
         
+        # Validate episodes field
+        episodes = data.get("episodes", None)
+        if episodes is not None:
+            if isinstance(episodes, list):
+                # List of episode indices - validate all are integers
+                for idx in episodes:
+                    if not isinstance(idx, int):
+                        raise ValueError(f"Episode indices must be integers, got {type(idx)}")
+                    if idx < 0:
+                        raise ValueError(f"Episode indices must be non-negative, got {idx}")
+            elif isinstance(episodes, dict):
+                # Dict of repo_id -> episode list
+                for repo_id, ep_list in episodes.items():
+                    if not isinstance(ep_list, list):
+                        raise ValueError(f"Episode list for {repo_id} must be a list, got {type(ep_list)}")
+                    for idx in ep_list:
+                        if not isinstance(idx, int):
+                            raise ValueError(f"Episode indices for {repo_id} must be integers, got {type(idx)}")
+                        if idx < 0:
+                            raise ValueError(f"Episode indices for {repo_id} must be non-negative, got {idx}")
+            else:
+                raise ValueError(f"episodes must be a list or dict, got {type(episodes)}")
+        
         return cls(
             type=sampler_type,
             dataset_weights=dataset_weights,
+            episodes=episodes,
             samples_per_epoch=samples_per_epoch,
             shuffle=shuffle,
             seed=seed,
