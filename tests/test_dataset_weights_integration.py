@@ -139,7 +139,7 @@ def test_weights_integration():
         "seed": 42,
     }
     
-    sampler, shuffle, dataset_weights = make_sampler(
+    sampler, shuffle, dataset_weights, episodes = make_sampler(
         wrapped_dataset,
         sampler_config=sampler_config
     )
