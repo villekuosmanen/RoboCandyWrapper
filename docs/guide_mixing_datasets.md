@@ -13,8 +13,8 @@ from robocandywrapper import make_dataset_without_config
 
 # Your playlist of datasets
 repo_ids = [
-    "lerobot/pusht_v2",      # v2.1 dataset
-    "lerobot/aloha_v3",      # v3.0 dataset
+    "lerobot/svla_so100_pickplace",  # v2.1 dataset
+    "lerobot/svla_so100_stacking",   # v3.0 dataset
 ]
 
 # Create the mixed dataset
@@ -24,6 +24,44 @@ print(f"Total episodes: {len(dataset)}")
 # > Total episodes: 500 (200 from pusht + 300 from aloha)
 ```
 
+## Selecting Specific Episodes
+
+Sometimes you don't need *all* the episodes from a dataset. Maybe you want to use only the first 10 episodes for quick testing, or select different episodes from each dataset in your mix.
+
+### Same Episodes for All Datasets
+
+If you want to load the same episode indices from all datasets:
+
+```python
+# Load episodes 0, 5, and 10 from all datasets
+dataset = make_dataset_without_config(
+    repo_ids,
+    episodes=[0, 5, 10]
+)
+```
+
+### Different Episodes Per Dataset
+
+For more control, you can specify different episodes for each dataset using a dictionary:
+
+```python
+# Select different episodes from each dataset
+episodes = {
+    "lerobot/svla_so100_pickplace": [0, 1, 2, 3, 4],      # First 5 episodes
+    "lerobot/svla_so100_stacking": [10, 11, 12, 13, 14],  # Episodes 10-14
+}
+
+dataset = make_dataset_without_config(
+    repo_ids,
+    episodes=episodes
+)
+```
+
+This is particularly useful when:
+* You want to use a subset of episodes for faster iteration
+* Different datasets have different quality episodes you want to focus on
+* You're creating train/val splits manually
+
 ## Advanced Mixing: Sampling Weights
 
 You can control how often data is sampled from each dataset using sampling weights. A weight of 2.0 effectively doubles the size of that dataset in the mix (samples are drawn twice as often).
@@ -31,8 +69,8 @@ You can control how often data is sampled from each dataset using sampling weigh
 ```python
 config = {
     "dataset_weights": {
-        "lerobot/pusht_v2": 1.0,  # Standard weight
-        "lerobot/aloha_v3": 2.0,  # Effectively doubles this dataset's size in the mix
+        "lerobot/svla_so100_pickplace": 1.0,  # Standard weight
+        "lerobot/svla_so100_stacking": 2.0,   # Effectively doubles this dataset's size in the mix
     }
 }
 

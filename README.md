@@ -28,8 +28,8 @@ from robocandywrapper import make_dataset_without_config
 
 # Your playlist: one old, one new
 repo_ids = [
-    "lerobot/pusht_v2",      # v2.1 dataset
-    "lerobot/aloha_v3",      # v3.0 dataset
+    "lerobot/svla_so100_pickplace",  # v2.1 dataset
+    "lerobot/svla_so100_stacking",   # v3.0 dataset
 ]
 
 # The factory handles the compatibility logic automatically

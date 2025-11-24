@@ -46,14 +46,14 @@ from robocandywrapper import make_dataset_without_config
 
 # Load the base dataset with the plugin
 dataset = make_dataset_without_config(
-    ["lerobot/pusht_v2"],
-    plugins=[LanguageInstructionPlugin("push the T-block")]
+    ["lerobot/svla_so100_pickplace"],
+    plugins=[LanguageInstructionPlugin("pick up the red block")]
 )
 
 # Verify
 sample = enhanced_dataset[0]
 print(sample["language_instruction"]) 
-# > "push the T-block"
+# > "pick up the red block"
 ```
 
 ## Advanced: Modifying Existing Data
