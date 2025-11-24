@@ -71,6 +71,7 @@ from lerobot.utils.utils import (
 
 from robocandywrapper.factory import make_dataset
 from robocandywrapper.samplers import make_sampler
+from robocandywrapper.samplers.factory import load_sampler_config
 from robocandywrapper.utils import WandBLogger
 
 
@@ -145,11 +146,18 @@ def train(cfg: TrainPipelineConfig):
     torch.backends.cudnn.benchmark = True
     torch.backends.cuda.matmul.allow_tf32 = True
 
+    # Load sampler config for extracting episodes
+    sampler_config = load_sampler_config()    
+    # If sampler config has episodes, inject them into cfg.dataset before creating dataset
+    if sampler_config is not None and sampler_config.episodes is not None:
+        cfg.dataset.episodes = sampler_config.episodes
+        logging.info(f"Using episode selection from sampler config: {sampler_config.episodes}")
+    
     logging.info("Creating dataset")
     dataset = make_dataset(cfg)
 
-    # Create sampler for the dataset
-    sampler, shuffle, dataset_weights = make_sampler(dataset)
+    # Create sampler for the dataset using above-loaded config
+    sampler, shuffle, dataset_weights, episodes = make_sampler(dataset, sampler_config=sampler_config)
     
     # Update dataset metadata with weights from sampler config
     if dataset_weights is not None:

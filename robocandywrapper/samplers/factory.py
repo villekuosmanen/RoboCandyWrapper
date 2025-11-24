@@ -74,8 +74,7 @@ def load_sampler_config(config_path: Optional[str] = None) -> Optional[SamplerCo
 def make_sampler(
     dataset,
     sampler_config: Optional[SamplerConfig | dict] = None,
-    config_path: Optional[str] = None,
-) -> tuple[Optional[torch.utils.data.Sampler], bool, Optional[dict[str, float]]]:
+) -> tuple[Optional[torch.utils.data.Sampler], bool, Optional[dict[str, float]], Optional[list[int] | dict[str, list[int]]]]:
     """
     Create a sampler for the dataset based on configuration.
     
@@ -85,14 +84,14 @@ def make_sampler(
     Args:
         dataset: A WrappedRobotDataset instance with get_dataset_ranges() method
         sampler_config: SamplerConfig instance or dict. If dict, will be parsed into SamplerConfig.
-                       If None, will try to load from config_path.
-        config_path: Path to JSON config file. Only used if sampler_config is None.
+                       If None, uses default PyTorch shuffling.
         
     Returns:
-        Tuple of (sampler, shuffle, dataset_weights):
+        Tuple of (sampler, shuffle, dataset_weights, episodes):
             - sampler: The created sampler instance, or None if no sampler config provided
             - shuffle: Whether to shuffle (False if using sampler, True otherwise)
             - dataset_weights: Dict of dataset weights from config, or None if no weights specified
+            - episodes: Episode selection from config (None, list, or dict), or None if not specified
             
     Example sampler_config dict:
         {
@@ -101,19 +100,19 @@ def make_sampler(
                 "lerobot/pusht": 2.0,
                 "lerobot/aloha_sim_insertion": 0.5,
             },
+            "episodes": {
+                "lerobot/pusht": [0, 1, 2],
+                "lerobot/aloha_sim_insertion": [5, 6, 7]
+            },
             "samples_per_epoch": 10000,
             "shuffle": true,
             "seed": 42,
             "replacement": true
         }
     """
-    # Try to load config if not provided
-    if sampler_config is None:
-        sampler_config = load_sampler_config(config_path)
-    
     # No config means use default PyTorch shuffling
     if sampler_config is None:
-        return None, True, None
+        return None, True, None, None
     
     # Convert dict to SamplerConfig if needed
     if isinstance(sampler_config, dict):
@@ -121,12 +120,12 @@ def make_sampler(
             sampler_config = SamplerConfig.from_dict(sampler_config)
         except ValueError as e:
             logging.error(f"Invalid sampler configuration: {e}. Using default shuffling.")
-            return None, True, None
+            return None, True, None, None
     
     # Validate sampler type
     if sampler_config.type != "weighted":
         logging.warning(f"Unsupported sampler type: {sampler_config.type}. Using default shuffling.")
-        return None, True, None
+        return None, True, None, None
     
     # Check if dataset has the required method
     if not hasattr(dataset, 'get_dataset_ranges'):
@@ -135,19 +134,21 @@ def make_sampler(
             "Sampler can only be used with WrappedRobotDataset. "
             "Using default shuffling."
         )
-        return None, True, None
+        return None, True, None, None
     
     # Get dataset information
     try:
         dataset_ranges, dataset_ids = dataset.get_dataset_ranges()
     except Exception as e:
         logging.error(f"Failed to get dataset ranges: {e}. Using default shuffling.")
-        return None, True, None
+        return None, True, None, None
     
     # If only one dataset, no need for weighted sampling
     if len(dataset_ranges) == 1:
         logging.info("Single dataset detected. Using default shuffling instead of weighted sampler.")
-        return None, True, None
+        # Still return episodes even if not using weighted sampler
+        episodes = sampler_config.episodes if sampler_config else None
+        return None, True, None, episodes
     
     # Log sampler configuration
     logging.info("Creating WeightedSampler:")
@@ -174,10 +175,10 @@ def make_sampler(
         )
         
         # When using a sampler, DataLoader shuffle must be False
-        # Return the dataset weights so they can be used for metadata stats
-        return sampler, False, sampler_config.dataset_weights
+        # Return the dataset weights and episodes so they can be used for metadata stats and filtering
+        return sampler, False, sampler_config.dataset_weights, sampler_config.episodes
         
     except Exception as e:
         logging.error(f"Failed to create WeightedSampler: {e}. Using default shuffling.")
-        return None, True, None
+        return None, True, None, None
 
