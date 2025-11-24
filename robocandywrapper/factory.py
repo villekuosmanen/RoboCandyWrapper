@@ -72,7 +72,7 @@ def _create_datasets(
     repo_ids: List[str],
     root: Optional[str],
     revision: Optional[str],
-    episodes: Optional[list[int]],
+    episodes: Optional[list[int] | dict[str, list[int]]],
     video_backend: str,
     action_delta_indices: Optional[List] = None,
     observation_delta_indices: Optional[List] = None,
@@ -85,7 +85,10 @@ def _create_datasets(
         repo_ids: List of repository IDs to load.
         root: Root directory for datasets.
         revision: Dataset revision.
-        episodes: Specific episodes to load.
+        episodes: Specific episodes to load. Can be:
+            - None: Load all episodes from all datasets
+            - list[int]: Load these episodes from ALL datasets
+            - dict[str, list[int]]: Load specific episodes per dataset (key: repo_id, value: episode list)
         video_backend: Video backend to use.
         action_delta_indices: Frame indices for actions.
         observation_delta_indices: Frame indices for observations.
@@ -96,8 +99,40 @@ def _create_datasets(
         List of dataset instances.
     """
     datasets = []
+
+    if isinstance(episodes, dict):
+        # Check for keys that don't match repo_ids
+        invalid_keys = set(episodes.keys()) - set(repo_ids)
+        if invalid_keys:
+            logging.warning(
+                f"Episode selection dictionary contains keys that do not match any dataset repo_ids: {invalid_keys}",
+                f"These keys will be ignored. Available repo_ids: {repo_ids}",
+            )
+        # Check for repo_ids that don't have episodes specified
+        missing_repo_ids = set(repo_ids) - set(episodes.keys())
+        if missing_repo_ids:
+            logging.warning(
+                f"Repo IDs without episode selection (will load all episodes): {missing_repo_ids}",
+            )
     
     for repo_id in repo_ids:
+        # Determine which episodes to load for this dataset
+        dataset_episodes = None
+        if isinstance(episodes, dict):
+            # Per-dataset episode selection
+            dataset_episodes = episodes.get(repo_id)
+        elif isinstance(episodes, list):
+            # Same episodes for all datasets
+            dataset_episodes = episodes
+        
+        # Log episode selection for this dataset
+        if isinstance(episodes, dict) and dataset_episodes is not None:
+            logging.info(f"Loading {len(dataset_episodes)} episodes for {repo_id}")
+        elif isinstance(episodes, list):
+            logging.info(f"Loading {len(episodes)} episodes for all datasets")
+        else:
+            logging.info(f"Loading all episodes for {repo_id} (no episode selection provided)")
+
         # Load metadata first to check version
         try:
             # Try loading metadata with the standard class first
@@ -132,7 +167,7 @@ def _create_datasets(
         dataset = dataset_cls(
             repo_id,
             root=root,
-            episodes=episodes,
+            episodes=dataset_episodes,
             delta_timestamps=delta_timestamps,
             image_transforms=None,  # Will be applied by WrappedRobotDataset
             revision=revision,
@@ -206,7 +241,7 @@ def make_dataset_without_config(
     observation_delta_indices: List = None,
     root: str = None,
     video_backend: str = "pyav",
-    episodes: list[int] | None = None,
+    episodes: list[int] | dict[str, list[int]] | None = None,
     revision: str | None = None,
     use_imagenet_stats: bool = True,
     plugins: Optional[list[DatasetPlugin]] = None,
@@ -219,7 +254,10 @@ def make_dataset_without_config(
         observation_delta_indices (List, optional): Delta indices for observations
         root (str, optional): Root directory for datasets
         video_backend (str): Video backend to use (default: "pyav")
-        episodes (list[int], optional): Specific episodes to load
+        episodes (list[int], optional): Specific episodes to load Can be:
+            - None: Load all episodes from all datasets
+            - list[int]: Load these episodes from ALL datasets
+            - dict[str, list[int]]: Load specific episodes per dataset (key: repo_id, value: episode list)
         revision (str, optional): Dataset revision
         use_imagenet_stats (bool): Whether to use ImageNet normalization stats (default: True)
         plugins (Optional[list[DatasetPlugin]]): Optional list of plugins to attach to the dataset(s)

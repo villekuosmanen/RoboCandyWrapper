@@ -4,6 +4,10 @@
     "lerobot/svla_so100_pickplace": 2.5,
     "lerobot/svla_so100_stacking": 1.0
   },
+  "episodes": {
+    "lerobot/svla_so100_pickplace": [1, 2, 4],
+    "lerobot/svla_so100_stacking": [0, 3, 5]
+  },
   "samples_per_epoch": null,
   "shuffle": true,
   "seed": 42,
