@@ -11,18 +11,19 @@
 
 ## 🍬 Why do I need this?
 
-You have robot data. Lots of it. But it's messy:
-*   Some datasets are from the "old days" (v2.1 dataset).
-*   Some are brand new (v3.0 dataset).
-*   You want to mix various data sources as needed, without permanently merging them.
+You have robot data. Lots of it. But working with it is a pain.
 
-Traditionally, you'd have to write complex scripts to convert everything to a single format. **RoboCandyWrapper** handles that compatibility layer for you. It wraps your datasets in a sweet, consistent interface so you can focus on training, not data plumbing.
+Your datasets are split across incompatible LeRobot versions, extending or transforming them risks breaking compatibility, and balancing across data sources takes more effort than it should.
 
-Additionally, you might want to extend your datasets with additional labels and columns without breaking backwards compatibility of data or code with LeRobot. RoboCandyWrapper provides an extendible **Adapter** system to add new data to existing datasets, load any number of adapters during training, and mixing data between adapters.
+**RoboCandyWrapper handles all of this:**
 
-RoboCandyWrapper also includes a **Sampler** system to change the ratio of sampling between multiple data sources, so you can increase or decrease the weight of specific datasets in your data mix as needed.
+* **Mix datasets freely** — Load v2.1 and v3.0 LeRobot datasets through a single unified interface, and use them together as if they were the same format.
 
-RoboCandyWrapper is still experimental so do note that the library API could change in the future although we'll do our best to avoid unnecessary changes!
+* **Extend without breaking** — Add custom labels or columns to existing datasets via **Plugins**, while staying fully compatible with LeRobot tooling.
+
+* **Control your data mix** — Use built-in **Samplers** to increase or decrease the weight of specific datasets in your mix.
+
+> ⚠️ RoboCandyWrapper is still experimental so do note that the API could change in the future, although we'll do our best to avoid unnecessary changes!
 
 ## 🍬 Quick Start (5 Minutes)
 
