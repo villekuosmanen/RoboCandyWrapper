@@ -486,6 +486,14 @@ class LeRobot21Dataset(torch.utils.data.Dataset):
             self.hf_dataset = self.load_hf_dataset()
 
         self.episode_data_index = get_episode_data_index(self.meta.episodes, self.episodes)
+        
+        # Create mapping from episode index to position in filtered list (for delta queries)
+        # When episodes=[1, 2, 4], this creates {1: 0, 2: 1, 4: 2}
+        if self.episodes is not None:
+            self._episode_idx_to_position = {ep_idx: pos for pos, ep_idx in enumerate(self.episodes)}
+        else:
+            # If all episodes loaded, episode index equals position
+            self._episode_idx_to_position = None
 
         # Check timestamps
         # Convert to list for compatibility with newer datasets library
@@ -650,8 +658,11 @@ class LeRobot21Dataset(torch.utils.data.Dataset):
             return get_hf_features_from_features(self.features)
 
     def _get_query_indices(self, idx: int, ep_idx: int) -> tuple[dict[str, list[int | bool]]]:
-        ep_start = self.episode_data_index["from"][ep_idx]
-        ep_end = self.episode_data_index["to"][ep_idx]
+        # Convert episode index to position in filtered list for episode_data_index lookup
+        ep_position = self._episode_idx_to_position[ep_idx] if self._episode_idx_to_position is not None else ep_idx
+        
+        ep_start = self.episode_data_index["from"][ep_position]
+        ep_end = self.episode_data_index["to"][ep_position]
         query_indices = {
             key: [max(ep_start.item(), min(ep_end.item() - 1, idx + delta)) for delta in delta_idx]
             for key, delta_idx in self.delta_indices.items()
