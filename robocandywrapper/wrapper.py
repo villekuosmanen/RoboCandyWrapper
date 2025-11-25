@@ -378,17 +378,52 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
         valid_indices = []
         episodes_meta = dataset.meta.episodes
         
-        for ep_idx in dataset.episodes:
-            ep_info = episodes_meta[ep_idx]
+        # Handle both dict and list structures
+        if isinstance(episodes_meta, dict):
+            # Dict structure: episodes_meta[ep_idx] gives episode info
+            for ep_idx in dataset.episodes:
+                if ep_idx not in episodes_meta:
+                    logging.warning(f"Episode {ep_idx} not found in metadata, skipping")
+                    continue
+                ep_info = episodes_meta[ep_idx]
+                    
+                # Get range of frames for this episode
+                start = ep_info.get("dataset_from_index")
+                end = ep_info.get("dataset_to_index")
                 
-            # Get range of frames for this episode
-            start = ep_info.get("dataset_from_index")
-            end = ep_info.get("dataset_to_index")
-            
-            if start is None or end is None:
-                 continue
-                 
-            valid_indices.extend(range(start, end))
+                if start is None or end is None:
+                     continue
+                     
+                valid_indices.extend(range(start, end))
+        else:
+            # List structure: could be full list or filtered
+            # Check if it's a full list (length matches total episodes) or filtered (matches selected episodes)
+            if len(episodes_meta) == dataset.meta.total_episodes:
+                # Full list: use episode index directly
+                for ep_idx in dataset.episodes:
+                    if ep_idx >= len(episodes_meta):
+                        logging.warning(f"Episode index {ep_idx} out of range, skipping")
+                        continue
+                    ep_info = episodes_meta[ep_idx]
+                    
+                    start = ep_info.get("dataset_from_index")
+                    end = ep_info.get("dataset_to_index")
+                    
+                    if start is None or end is None:
+                        continue
+                        
+                    valid_indices.extend(range(start, end))
+            else:
+                # Filtered list: episodes_meta is already filtered, iterate sequentially
+                # Assumes episodes_meta and dataset.episodes are in same order
+                for ep_meta in episodes_meta:
+                    start = ep_meta.get("dataset_from_index")
+                    end = ep_meta.get("dataset_to_index")
+                    
+                    if start is None or end is None:
+                        continue
+                        
+                    valid_indices.extend(range(start, end))
             
         return valid_indices
 
