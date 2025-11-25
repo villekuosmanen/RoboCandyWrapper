@@ -10,15 +10,70 @@ Range Format:
 - Single episode:    5:success
 - Episode range:     0-42:success
 - Open-ended range:  44-:success  (from episode 44 to end)
+
+Optional Features:
+- Push to Hub: Use --push-to-hub to automatically push labeled dataset to Hugging Face Hub
 """
 
 import argparse
+import contextlib
+import logging
+import packaging.version
 from pathlib import Path
 from typing import Dict
 
+from huggingface_hub import HfApi
+from huggingface_hub.utils import RevisionNotFoundError
+from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
+from lerobot.datasets.backward_compatibility import BackwardCompatibilityError
+
 from robocandywrapper.plugins import EpisodeOutcomePlugin
 from robocandywrapper import WrappedRobotDataset
-from lerobot.datasets.lerobot_dataset import LeRobotDataset
+from robocandywrapper.dataformats.lerobot_21 import LeRobot21Dataset, LeRobot21DatasetMetadata
+
+
+def load_dataset_with_version_detection(
+    repo_id: str,
+    root: str | None = None,
+    revision: str | None = None
+) -> LeRobotDataset | LeRobot21Dataset:
+    """
+    Load a dataset with automatic version detection.
+    
+    Determines whether to use LeRobotDataset (v3.0+) or LeRobot21Dataset (legacy)
+    based on the dataset's codebase version.
+    
+    Args:
+        repo_id: Dataset repository ID
+        root: Optional root directory for dataset storage
+        revision: Optional dataset revision
+        
+    Returns:
+        Either a LeRobotDataset or LeRobot21Dataset instance
+    """
+    try:
+        # Try loading metadata with the standard class first
+        ds_meta = LeRobotDatasetMetadata(repo_id, root=root, revision=revision)
+        
+        # Check for version in multiple places
+        version = getattr(ds_meta, "codebase_version", None)
+        if version is None and hasattr(ds_meta, "info"):
+            version = ds_meta.info.get("codebase_version")
+        
+        # If version is missing or less than 3.0, treat as legacy
+        if version is None or packaging.version.parse(str(version)) < packaging.version.parse("3.0"):
+            logging.info(f"Detected legacy dataset version {version} for {repo_id}. Using LeRobot21Dataset.")
+            dataset = LeRobot21Dataset(repo_id, root=root, revision=revision)
+        else:
+            logging.info(f"Detected dataset version {version} for {repo_id}. Using LeRobotDataset.")
+            dataset = LeRobotDataset(repo_id, root=root, revision=revision)
+            
+    except (BackwardCompatibilityError, NotImplementedError):
+        # Fallback for cases where standard metadata loading fails completely
+        logging.info(f"Standard metadata loading failed for {repo_id}. Falling back to LeRobot21Dataset.")
+        dataset = LeRobot21Dataset(repo_id, root=root, revision=revision)
+    
+    return dataset
 
 
 def parse_range_spec(spec: str) -> tuple[int | None, int | None, str]:
@@ -174,8 +229,65 @@ def load_ranges_from_file(file_path: Path) -> list[str]:
     return ranges
 
 
+def push_dataset_to_hub(
+    dataset: LeRobotDataset | LeRobot21Dataset,
+    branch: str = "main"
+):
+    """
+    Push the modified dataset to the Hugging Face Hub.
+    
+    Args:
+        dataset: Dataset to push (LeRobotDataset or LeRobot21Dataset)
+        branch: Branch to push to (default: "main")
+    
+    Note:
+        If the dataset has a revision field, it will be used as a tag
+        pointing to the specified branch.
+    """
+    print(f"\nPushing dataset to hub: {dataset.repo_id}")
+    print(f"  Branch: {branch}")
+    
+    # Use dataset's revision as tag if available
+    tag = getattr(dataset, 'revision', None)
+    if tag:
+        print(f"  Tag: {tag}")
+    
+    hub_api = HfApi()
+    
+    # Push the dataset directory to the hub
+    # The dataset.root contains the modified metadata files
+    print("\nUploading modified files...")
+    hub_api.upload_folder(
+        folder_path=dataset.root,
+        repo_id=dataset.repo_id,
+        repo_type="dataset",
+        revision=branch,
+        commit_message="Update episode outcome labels"
+    )
+    print("✓ Dataset uploaded successfully")
+    
+    # Handle tag creation/update if dataset has a revision
+    if tag:
+        print(f"\nManaging tag '{tag}'...")
+        # Delete existing tag if it exists
+        with contextlib.suppress(RevisionNotFoundError):
+            hub_api.delete_tag(dataset.repo_id, tag=tag, repo_type="dataset")
+            print(f"  Deleted existing tag '{tag}'")
+        
+        # Create the new tag pointing to the branch
+        hub_api.create_tag(
+            dataset.repo_id,
+            tag=tag,
+            revision=branch,
+            repo_type="dataset",
+        )
+        print(f"  ✓ Created tag '{tag}' pointing to '{branch}'")
+    
+    print(f"\n✓ Push to hub complete!")
+
+
 def interactive_labeling(
-    dataset: LeRobotDataset,
+    dataset: LeRobotDataset | LeRobot21Dataset,
     outcome_instance,
     start_episode: int = 0
 ):
@@ -183,7 +295,7 @@ def interactive_labeling(
     Interactive labeling mode with episode preview.
     
     Args:
-        dataset: Dataset to label
+        dataset: Dataset to label (LeRobotDataset or LeRobot21Dataset)
         outcome_instance: Episode outcome plugin instance
         start_episode: Episode to start from
     """
@@ -281,6 +393,14 @@ Usage Examples:
   
   # Show current labels
   python label_episode_outcomes.py --dataset lerobot/pusht --show
+  
+  # Label and push to hub
+  python label_episode_outcomes.py --dataset lerobot/pusht \\
+      --ranges "0-42:success" "43-:failure" --push-to-hub
+  
+  # Push with custom branch (tag will be created from dataset revision)
+  python label_episode_outcomes.py --dataset lerobot/pusht \\
+      --file labels.txt --push-to-hub --hub-branch dev
 
 labels.txt format:
   # One range per line, # for comments
@@ -329,12 +449,27 @@ labels.txt format:
         default=0,
         help='Starting episode for interactive mode (default: 0)'
     )
+    parser.add_argument(
+        '--push-to-hub',
+        action='store_true',
+        help='Push the modified dataset to Hugging Face Hub after labeling'
+    )
+    parser.add_argument(
+        '--hub-branch',
+        type=str,
+        default='main',
+        help='Branch to push to on the hub (default: main)'
+    )
     
     args = parser.parse_args()
     
-    # Load dataset
+    # Load dataset with automatic version detection
     print(f"Loading dataset: {args.dataset}")
-    dataset = LeRobotDataset(args.dataset, root=args.root)
+    dataset = load_dataset_with_version_detection(
+        repo_id=args.dataset,
+        root=args.root,
+        revision=None
+    )
     print(f"  Episodes: {len(dataset.meta.episodes)}")
     print(f"  Total frames: {dataset.num_frames}")
     
@@ -406,6 +541,14 @@ labels.txt format:
     else:
         # Interactive mode (default)
         interactive_labeling(dataset, outcome_instance, args.start_episode)
+    
+    # Push to hub if requested
+    if args.push_to_hub:
+        try:
+            push_dataset_to_hub(dataset, branch=args.hub_branch)
+        except Exception as e:
+            print(f"\n❌ Error pushing to hub: {e}")
+            return 1
     
     return 0
 
