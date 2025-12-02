@@ -5,6 +5,7 @@ from typing import Any, Callable, Optional, Sequence, Union
 import warnings
 
 from lerobot.datasets.video_utils import VideoFrame
+from lerobot.configs.types import FeatureType, PolicyFeature
 import torch
 
 from robocandywrapper import DatasetPlugin, PluginConflictError, PluginInstance
@@ -188,6 +189,27 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
                 features[key] = self._meta.features[key]
         
         return features
+    
+    @property
+    def plugin_features(self) -> datasets.Features:
+        """
+        Features added only by plugins.
+        
+        Returns only the features that come from plugins, excluding any
+        features that are part of the base datasets.
+        """
+        # Get all base dataset features (excluding disabled ones)
+        base_features = set()
+        for dataset in self._datasets:
+            base_features.update(k for k in dataset.hf_features.keys() if k not in self.disabled_features)
+        
+        # Return only plugin features that are not in base datasets
+        plugin_only_features = {}
+        for key, value in self._meta.features.items():
+            if key not in base_features:
+                plugin_only_features[key] = PolicyFeature(type=FeatureType.STATE, shape=value['shape'])
+        
+        return plugin_only_features
     
     @property
     def meta(self) -> WrappedRobotDatasetMetadataView:
