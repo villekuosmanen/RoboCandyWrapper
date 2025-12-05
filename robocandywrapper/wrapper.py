@@ -106,7 +106,7 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
                 logging.warning(
                 f"keys {extra_keys} of {repo_id} were disabled as they are not contained in all the "
                 "other datasets."
-            )
+                )
             self.disabled_features.update(extra_keys)
 
         # Validate that common features have compatible shapes
