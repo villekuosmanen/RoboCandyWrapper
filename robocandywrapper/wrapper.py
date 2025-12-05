@@ -102,7 +102,8 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
             )
         for repo_id, ds in zip(self.repo_ids, self._datasets, strict=True):
             extra_keys = set(ds.features).difference(intersection_features)
-            logging.warning(
+            if extra_keys:
+                logging.warning(
                 f"keys {extra_keys} of {repo_id} were disabled as they are not contained in all the "
                 "other datasets."
             )
