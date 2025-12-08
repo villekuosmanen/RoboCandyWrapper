@@ -9,12 +9,12 @@ from typing import Optional
 
 from glob import glob
 from huggingface_hub.constants import SAFETENSORS_SINGLE_FILE
-from lerobot.utils.constants import PRETRAINED_MODEL_DIR
+from lerobot.common.constants import PRETRAINED_MODEL_DIR
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.configs.train import TrainPipelineConfig
 from lerobot.configs.types import FeatureType
-from lerobot.datasets.lerobot_dataset import LeRobotDatasetMetadata
-from lerobot.datasets.utils import dataset_to_policy_features
+from lerobot.common.datasets.lerobot_dataset import LeRobotDatasetMetadata
+from lerobot.common.datasets.utils import dataset_to_policy_features
 from termcolor import colored
 
 

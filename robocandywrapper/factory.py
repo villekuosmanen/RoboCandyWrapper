@@ -6,14 +6,14 @@ import packaging.version
 
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.configs.train import TrainPipelineConfig
-from lerobot.datasets.lerobot_dataset import (
+from lerobot.common.datasets.lerobot_dataset import (
     LeRobotDataset,
     LeRobotDatasetMetadata,
 )
-from lerobot.datasets.backward_compatibility import BackwardCompatibilityError
-from lerobot.datasets.transforms import ImageTransforms
-from lerobot.datasets.factory import IMAGENET_STATS
-from lerobot.utils.constants import ACTION, REWARD
+from lerobot.common.datasets.backward_compatibility import BackwardCompatibilityError
+from lerobot.common.datasets.transforms import ImageTransforms
+from lerobot.common.datasets.factory import IMAGENET_STATS
+# from lerobot.common.constants import ACTION, REWARD
 
 from robocandywrapper.wrapper import WrappedRobotDataset
 from robocandywrapper import DatasetPlugin
@@ -57,9 +57,9 @@ def resolve_delta_timestamps(
     
     delta_timestamps = {}
     for key in ds_meta.features:
-        if key == REWARD and reward_indices is not None:
+        if key == "reward" and reward_indices is not None:
             delta_timestamps[key] = _indices_to_times(reward_indices, ds_meta.fps)
-        if key == ACTION and action_indices is not None:
+        if key == "action" and action_indices is not None:
             delta_timestamps[key] = _indices_to_times(action_indices, ds_meta.fps)
         if key.startswith("observation.") and observation_indices is not None:
             delta_timestamps[key] = _indices_to_times(observation_indices, ds_meta.fps)

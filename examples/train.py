@@ -56,23 +56,23 @@ from torch.optim import Optimizer
 
 from lerobot.configs import parser
 from lerobot.configs.train import TrainPipelineConfig
-from lerobot.datasets.utils import cycle
+from lerobot.common.datasets.utils import cycle
 from lerobot.envs.factory import make_env
 from lerobot.optim.factory import make_optimizer_and_scheduler
 from lerobot.policies.factory import make_policy
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.utils import get_device_from_parameters
 from lerobot.rl.eval_policy import eval_policy
-from lerobot.utils.logging_utils import AverageMeter, MetricsTracker
-from lerobot.utils.random_utils import set_seed
-from lerobot.utils.train_utils import (
+from lerobot.common.utils.logging_utils import AverageMeter, MetricsTracker
+from lerobot.common.utils.random_utils import set_seed
+from lerobot.common.utils.train_utils import (
     get_step_checkpoint_dir,
     get_step_identifier,
     load_training_state,
     save_checkpoint,
     update_last_checkpoint,
 )
-from lerobot.utils.utils import (
+from lerobot.common.utils.utils import (
     format_big_number,
     get_safe_torch_device,
     has_method,

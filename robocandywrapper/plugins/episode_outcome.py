@@ -7,7 +7,7 @@ import warnings
 from pathlib import Path
 
 import torch
-from lerobot.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 
 from robocandywrapper.plugin import DatasetPlugin, PluginInstance
 from robocandywrapper.constants import CANDYWRAPPER_PLUGINS_DIR, EPISODE_OUTCOME_PLUGIN_NAME

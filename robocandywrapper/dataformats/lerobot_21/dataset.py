@@ -30,15 +30,15 @@ from huggingface_hub import HfApi, snapshot_download
 from huggingface_hub.constants import REPOCARD_NAME
 from huggingface_hub.errors import RevisionNotFoundError
 
-from lerobot.utils.constants import HF_LEROBOT_HOME
-from lerobot.datasets.compute_stats import aggregate_stats, compute_episode_stats
-from lerobot.datasets.image_writer import AsyncImageWriter, write_image
-from lerobot.datasets.utils import (
+from lerobot.common.constants import HF_LEROBOT_HOME
+from lerobot.common.datasets.compute_stats import aggregate_stats, compute_episode_stats
+from lerobot.common.datasets.image_writer import AsyncImageWriter, write_image
+from lerobot.common.datasets.utils import (
     DEFAULT_FEATURES,
     DEFAULT_IMAGE_PATH,
     INFO_PATH,
-    LEGACY_TASKS_PATH as TASKS_PATH,
-    _validate_feature_names,
+    # LEGACY_TASKS_PATH as TASKS_PATH,
+    # _validate_feature_names,
     check_delta_timestamps,
     check_version_compatibility,
     create_empty_dataset_info,
@@ -68,7 +68,7 @@ from robocandywrapper.dataformats.lerobot_21.utils import (
     write_episode,
     write_episode_stats,
 )
-from lerobot.datasets.video_utils import (
+from lerobot.common.datasets.video_utils import (
     decode_video_frames,
     encode_video_frames,
     get_safe_default_codec,
@@ -93,13 +93,14 @@ class LeRobot21DatasetMetadata:
         try:
             if force_cache_sync:
                 raise FileNotFoundError
+            self.pull_from_repo()
             self.load_metadata()
         except (FileNotFoundError, NotADirectoryError):
             if is_valid_version(self.revision):
                 self.revision = get_safe_version(self.repo_id, self.revision)
 
             (self.root / "meta").mkdir(exist_ok=True, parents=True)
-            self.pull_from_repo(allow_patterns="meta/")
+            self.pull_from_repo()
             self.load_metadata()
 
     def load_metadata(self):

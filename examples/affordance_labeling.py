@@ -11,7 +11,7 @@ This example shows how to:
 import numpy as np
 from robocandywrapper.plugins import LabelledAffordancePlugin
 from robocandywrapper import WrappedRobotDataset
-from lerobot.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 
 
 def create_mock_affordances(n_frames: int) -> np.ndarray:

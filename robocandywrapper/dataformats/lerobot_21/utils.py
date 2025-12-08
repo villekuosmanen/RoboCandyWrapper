@@ -63,7 +63,7 @@ def load_jsonlines(fpath: Path) -> list:
 
 def serialize_dict(stats: dict[str, torch.Tensor | np.ndarray | dict]) -> dict:
     """Convert tensors/arrays to lists for JSON serialization."""
-    from lerobot.datasets.utils import flatten_dict, unflatten_dict
+    from lerobot.common.datasets.utils import flatten_dict, unflatten_dict
     
     serialized_dict = {}
     for key, value in flatten_dict(stats).items():
@@ -79,7 +79,7 @@ def serialize_dict(stats: dict[str, torch.Tensor | np.ndarray | dict]) -> dict:
 
 
 def cast_stats_to_numpy(stats) -> dict[str, dict[str, np.ndarray]]:
-    from lerobot.datasets.utils import flatten_dict, unflatten_dict
+    from lerobot.common.datasets.utils import flatten_dict, unflatten_dict
     
     stats = {key: np.array(value) for key, value in flatten_dict(stats).items()}
     return unflatten_dict(stats)

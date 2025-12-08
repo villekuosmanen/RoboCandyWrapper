@@ -24,8 +24,8 @@ from typing import Dict
 
 from huggingface_hub import HfApi
 from huggingface_hub.utils import RevisionNotFoundError
-from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
-from lerobot.datasets.backward_compatibility import BackwardCompatibilityError
+from lerobot.common.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
+from lerobot.common.datasets.backward_compatibility import BackwardCompatibilityError
 
 from robocandywrapper.plugins import EpisodeOutcomePlugin
 from robocandywrapper import WrappedRobotDataset

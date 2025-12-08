@@ -15,7 +15,7 @@ import torch
 from termcolor import colored
 from torch.utils.data import DataLoader
 
-from lerobot.utils.utils import init_logging
+from lerobot.common.utils.utils import init_logging
 from robocandywrapper.factory import make_dataset_without_config
 from robocandywrapper.samplers import make_sampler
 
