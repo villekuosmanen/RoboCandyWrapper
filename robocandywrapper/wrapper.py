@@ -23,6 +23,7 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
         warn_on_key_conflicts: bool = True,
         error_on_key_conflicts: bool = True,
         dataset_weights: Optional[dict[str, float]] = None,
+        key_rename_map: Optional[dict[str, str]] = None,
         **kwargs
     ):
         """
@@ -35,6 +36,14 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
             warn_on_key_conflicts: Warn when plugins have overlapping keys (if not raising errors)
             error_on_key_conflicts: Raise error on key conflicts (default: True)
             dataset_weights: Optional weights for computing weighted stats (e.g., {"dataset_id": 2.0})
+            key_rename_map: Optional mapping from source keys to target keys for unifying
+                datasets with different naming conventions. Keys are renamed before the
+                intersection logic runs, allowing datasets with different key names to be
+                combined. Example: {"action.pos": "action", "trajectory": "action"}
+                
+                Note: When a key is renamed, any corresponding "_is_pad" key (added by
+                LeRobot when using delta_timestamps) is automatically renamed as well.
+                E.g., "action.pos" -> "action" also renames "action.pos_is_pad" -> "action_is_pad".
         """
         super().__init__()
         
@@ -64,6 +73,10 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
             self._cumulative_lengths.append(self._cumulative_lengths[-1] + length)
         self._total_length = self._cumulative_lengths[-1]
         
+        # Key rename mapping: unify differently-named keys across datasets
+        self.key_rename_map = key_rename_map or {}
+        self._dataset_renames = self._compute_dataset_renames()
+        
         # Plugin management: one plugin class, many instances (one per dataset)
         self._plugins: list[DatasetPlugin] = plugins or []
         self._plugin_instances: list[list[PluginInstance]] = []
@@ -91,40 +104,51 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
         # Disable any data keys that are not common across all of the datasets. Note: we may relax this
         # restriction in future iterations of this class. For now, this is necessary at least for being able
         # to use PyTorch's default DataLoader collate function.
+        #
+        # Key rename mapping is applied first (conceptually), so intersection is computed on
+        # "effective" features (post-rename). This allows datasets with different key names to be
+        # unified before the intersection check.
         self.disabled_features = set()
-        intersection_features = set(self._datasets[0].features)
-        for ds in self._datasets:
-            intersection_features.intersection_update(ds.features)
+        intersection_features = self._get_effective_features(0)
+        for i in range(len(self._datasets)):
+            intersection_features.intersection_update(self._get_effective_features(i))
         if len(intersection_features) == 0:
             raise RuntimeError(
                 "Multiple datasets were provided but they had no keys common to all of them. "
                 "The multi-dataset functionality currently only keeps common keys."
             )
-        for repo_id, ds in zip(self.repo_ids, self._datasets, strict=True):
-            extra_keys = set(ds.features).difference(intersection_features)
-            logging.warning(
-                f"keys {extra_keys} of {repo_id} were disabled as they are not contained in all the "
-                "other datasets."
-            )
+        for i, repo_id in enumerate(self.repo_ids):
+            effective_keys = self._get_effective_features(i)
+            extra_keys = effective_keys.difference(intersection_features)
+            if extra_keys:
+                logging.warning(
+                    f"keys {extra_keys} of {repo_id} were disabled as they are not contained in all the "
+                    "other datasets."
+                )
             self.disabled_features.update(extra_keys)
 
         # Validate that common features have compatible shapes
+        # Note: We need to look up the original key name for renamed keys
         for key in intersection_features:
             shapes = []
-            for ds in self._datasets:
-                if key in ds.meta.features:
-                    feature_shape = ds.meta.features[key].get('shape', [])
+            shape_details = []
+            for i, ds in enumerate(self._datasets):
+                # Find the original key (may be renamed)
+                renames = self._dataset_renames[i]
+                reverse_renames = {v: k for k, v in renames.items()}
+                original_key = reverse_renames.get(key, key)
+                
+                if original_key in ds.meta.features:
+                    feature_shape = ds.meta.features[original_key].get('shape', [])
                     shapes.append(tuple(feature_shape))
+                    if original_key != key:
+                        shape_details.append(f"{ds.repo_id}: {feature_shape} (from '{original_key}')")
+                    else:
+                        shape_details.append(f"{ds.repo_id}: {feature_shape}")
             
             # Check if all shapes are the same
             unique_shapes = set(shapes)
             if len(unique_shapes) > 1:
-                shape_details = []
-                for ds in self._datasets:
-                    if key in ds.meta.features:
-                        shape = ds.meta.features[key].get('shape', [])
-                        shape_details.append(f"{ds.repo_id}: {shape}")
-                
                 raise ValueError(
                     f"Incompatible shapes for feature '{key}' across datasets:\n" +
                     "\n".join(f"  - {detail}" for detail in shape_details) +
@@ -294,6 +318,77 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
         self._meta.update_dataset_weights(dataset_weights)
         # Also update the cached stats property
         self.stats = self._meta.stats
+
+    def _compute_dataset_renames(self) -> list[dict[str, str]]:
+        """
+        Pre-compute which key renames apply to each dataset.
+        
+        For each dataset, determines which source keys from key_rename_map exist
+        and can be renamed (i.e., target key doesn't already exist).
+        
+        Also automatically handles derived _is_pad keys that LeRobot adds when
+        delta_timestamps are used. For example, if renaming "action.pos" -> "action",
+        this will also rename "action.pos_is_pad" -> "action_is_pad".
+        
+        Returns:
+            List of dicts mapping source_key -> target_key for each dataset
+        """
+        dataset_renames = []
+        for dataset in self._datasets:
+            ds_renames = {}
+            ds_keys = set(dataset.features)
+            
+            for source, target in self.key_rename_map.items():
+                if source in ds_keys:
+                    if target in ds_keys:
+                        # Target already exists in this dataset - skip rename to avoid conflict
+                        logging.warning(
+                            f"Skipping rename '{source}' -> '{target}' for {dataset.repo_id}: "
+                            f"target key already exists in dataset"
+                        )
+                    else:
+                        ds_renames[source] = target
+                        
+                        # Also handle the _is_pad suffix that LeRobot adds for delta_timestamps
+                        # These keys are dynamically added during __getitem__ and may not be in
+                        # dataset.features, but we still want to rename them consistently
+                        is_pad_source = f"{source}_is_pad"
+                        is_pad_target = f"{target}_is_pad"
+                        
+                        # Check for conflicts on the _is_pad key as well
+                        if is_pad_target in ds_keys:
+                            logging.warning(
+                                f"Skipping derived rename '{is_pad_source}' -> '{is_pad_target}' "
+                                f"for {dataset.repo_id}: target key already exists in dataset"
+                            )
+                        else:
+                            ds_renames[is_pad_source] = is_pad_target
+            
+            dataset_renames.append(ds_renames)
+        
+        return dataset_renames
+    
+    def _get_effective_features(self, dataset_idx: int) -> set[str]:
+        """
+        Get the effective feature keys for a dataset after applying renames.
+        
+        Args:
+            dataset_idx: Index of the dataset
+            
+        Returns:
+            Set of feature keys that would exist after renaming
+        """
+        ds = self._datasets[dataset_idx]
+        renames = self._dataset_renames[dataset_idx]
+        
+        effective = set()
+        for key in ds.features:
+            if key in renames:
+                effective.add(renames[key])
+            else:
+                effective.add(key)
+        
+        return effective
 
     def _validate_plugin_keys(self):
         """
@@ -482,7 +577,14 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
         # Add dataset index
         item["dataset_index"] = torch.tensor(dataset_idx)
         
-        # Remove disabled features
+        # Apply key renaming for this dataset (before filtering disabled features)
+        # This unifies differently-named keys across datasets
+        renames = self._dataset_renames[dataset_idx]
+        for source, target in renames.items():
+            if source in item:
+                item[target] = item.pop(source)
+        
+        # Remove disabled features (now operates on effective/renamed key names)
         for data_key in self.disabled_features:
             if data_key in item:
                 del item[data_key]

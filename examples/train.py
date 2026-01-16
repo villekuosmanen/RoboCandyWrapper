@@ -59,7 +59,7 @@ from lerobot.configs.train import TrainPipelineConfig
 from lerobot.datasets.utils import cycle
 from lerobot.envs.factory import make_env
 from lerobot.optim.factory import make_optimizer_and_scheduler
-from lerobot.policies.factory import make_policy
+from lerobot.policies.factory import make_policy, make_pre_post_processors
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.utils import get_device_from_parameters
 from lerobot.rl.eval_policy import eval_policy
@@ -165,6 +165,18 @@ def train(cfg: TrainPipelineConfig):
     
     logging.info("Creating dataset")
     dataset = make_dataset(cfg)
+    # TODO hack, do not use
+    # dataset.meta.features['observation.eef_6d_pose']= {
+    #     'dtype': "float32",
+    #     'shape': (7,),
+    # }
+    # # Update stats to match the new shape by appending the last element from observation.state
+    # import numpy as np
+    # for stat_key in ['min', 'max', 'mean', 'std']:
+    #     dataset.meta.stats['observation.eef_6d_pose'][stat_key] = np.concatenate([
+    #         dataset.meta.stats['observation.eef_6d_pose'][stat_key],
+    #         dataset.meta.stats['observation.state'][stat_key][-1:]
+    #     ])
 
     # Create sampler for the dataset using above-loaded config
     sampler, shuffle, dataset_weights, episodes = make_sampler(dataset, sampler_config=sampler_config)
@@ -186,6 +198,43 @@ def train(cfg: TrainPipelineConfig):
     policy = make_policy(
         cfg=cfg.policy,
         ds_meta=dataset.meta,
+    )
+
+    # Create processors - only provide dataset_stats if not resuming from saved processors
+    processor_kwargs = {}
+    postprocessor_kwargs = {}
+    if (cfg.policy.pretrained_path and not cfg.resume) or not cfg.policy.pretrained_path:
+        # Only provide dataset_stats when not resuming from saved processor state
+        processor_kwargs["dataset_stats"] = dataset.meta.stats
+
+    # For SARM, always provide dataset_meta for progress normalization
+    if cfg.policy.type == "sarm":
+        processor_kwargs["dataset_meta"] = dataset.meta
+
+    if cfg.policy.pretrained_path is not None:
+        processor_kwargs["preprocessor_overrides"] = {
+            "device_processor": {"device": device.type},
+            "normalizer_processor": {
+                "stats": dataset.meta.stats,
+                "features": {**policy.config.input_features, **policy.config.output_features},
+                "norm_map": policy.config.normalization_mapping,
+            },
+        }
+        processor_kwargs["preprocessor_overrides"]["rename_observations_processor"] = {
+            "rename_map": cfg.rename_map
+        }
+        postprocessor_kwargs["postprocessor_overrides"] = {
+            "unnormalizer_processor": {
+                "stats": dataset.meta.stats,
+                "features": policy.config.output_features,
+                "norm_map": policy.config.normalization_mapping,
+            },
+        }
+    preprocessor, postprocessor = make_pre_post_processors(
+        policy_cfg=cfg.policy,
+        pretrained_path=cfg.policy.pretrained_path,
+        **processor_kwargs,
+        **postprocessor_kwargs,
     )
 
     logging.info("Creating optimizer and scheduler")
@@ -239,6 +288,7 @@ def train(cfg: TrainPipelineConfig):
     for _ in range(step, cfg.steps):
         start_time = time.perf_counter()
         batch = next(dl_iter)
+        batch = preprocessor(batch)
         train_tracker.dataloading_s = time.perf_counter() - start_time
 
         for key in batch:
@@ -276,7 +326,16 @@ def train(cfg: TrainPipelineConfig):
         if cfg.save_checkpoint and is_saving_step:
             logging.info(f"Checkpoint policy after step {step}")
             checkpoint_dir = get_step_checkpoint_dir(cfg.output_dir, cfg.steps, step)
-            save_checkpoint(checkpoint_dir, step, cfg, policy, optimizer, lr_scheduler)
+            save_checkpoint(
+                checkpoint_dir=checkpoint_dir,
+                step=step,
+                cfg=cfg,
+                policy=policy,
+                optimizer=optimizer,
+                scheduler=lr_scheduler,
+                preprocessor=preprocessor,
+                postprocessor=postprocessor,
+            )
             update_last_checkpoint(checkpoint_dir)
             if wandb_logger:
                 wandb_logger.log_policy(checkpoint_dir)
@@ -326,6 +385,8 @@ def train(cfg: TrainPipelineConfig):
             datasets = [ds.strip('\'\" ') for ds in datasets_str.split(',')]
             cfg.dataset.repo_id = datasets
         policy.push_model_to_hub(cfg)
+        preprocessor.push_to_hub(cfg.policy.repo_id)
+        postprocessor.push_to_hub(cfg.policy.repo_id)
 
 
 def main():

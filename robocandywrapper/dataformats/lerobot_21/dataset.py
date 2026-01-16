@@ -773,6 +773,11 @@ class LeRobot21Dataset(torch.utils.data.Dataset):
         task_idx = item["task_index"].item()
         item["task"] = self.meta.tasks[task_idx]
 
+        # Hack - add gripper position to end
+        # only applies to a specific dataset
+        # if "observation.eef_6d_pose" in item and item["observation.eef_6d_pose"].shape[0] == 6:
+        #     item["observation.eef_6d_pose"] = torch.cat([item["observation.eef_6d_pose"], item["observation.state"][-1:]], dim=0)
+
         return item
 
     def __repr__(self):
