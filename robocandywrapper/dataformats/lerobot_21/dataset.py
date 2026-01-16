@@ -93,6 +93,7 @@ class LeRobot21DatasetMetadata:
         try:
             if force_cache_sync:
                 raise FileNotFoundError
+            self.pull_from_repo()
             self.load_metadata()
         except (FileNotFoundError, NotADirectoryError):
             if is_valid_version(self.revision):
@@ -728,7 +729,11 @@ class LeRobot21Dataset(torch.utils.data.Dataset):
         item = {}
         for vid_key, query_ts in query_timestamps.items():
             video_path = self.root / self.meta.get_video_file_path(ep_idx, vid_key)
-            frames = decode_video_frames(video_path, query_ts, self.tolerance_s, self.video_backend)
+            try:
+                frames = decode_video_frames(video_path, query_ts, self.tolerance_s, self.video_backend)
+            except Exception as e:
+                # fall back to trying to decode with pyav
+                frames = decode_video_frames(video_path, query_ts, self.tolerance_s, "pyav")
             item[vid_key] = frames.squeeze(0)
 
         return item
@@ -767,6 +772,11 @@ class LeRobot21Dataset(torch.utils.data.Dataset):
         # Add task as a string
         task_idx = item["task_index"].item()
         item["task"] = self.meta.tasks[task_idx]
+
+        # Hack - add gripper position to end
+        # only applies to a specific dataset
+        # if "observation.eef_6d_pose" in item and item["observation.eef_6d_pose"].shape[0] == 6:
+        #     item["observation.eef_6d_pose"] = torch.cat([item["observation.eef_6d_pose"], item["observation.state"][-1:]], dim=0)
 
         return item
 

@@ -76,6 +76,7 @@ def _create_datasets(
     observation_delta_indices: Optional[List] = None,
     reward_delta_indices: Optional[List] = None,
     use_imagenet_stats: bool = True,
+    load_videos: bool = True,
 ) -> List[LeRobotDataset | LeRobot21Dataset]:
     """Private helper to create dataset instances from a list of repo IDs.
     
@@ -92,6 +93,8 @@ def _create_datasets(
         observation_delta_indices: Frame indices for observations.
         reward_delta_indices: Frame indices for rewards.
         use_imagenet_stats: Whether to apply ImageNet normalization stats.
+        load_videos: Whether to download and load video files (default: True).
+            Set to False to skip video downloads when not needed.
     
     Returns:
         List of dataset instances.
@@ -170,6 +173,7 @@ def _create_datasets(
             image_transforms=None,  # Will be applied by WrappedRobotDataset
             revision=revision,
             video_backend=video_backend,
+            download_videos=load_videos,
         )
         
         # Apply ImageNet stats if needed
@@ -189,12 +193,18 @@ def _create_datasets(
 def make_dataset(
     cfg: TrainPipelineConfig,
     plugins: Optional[list[DatasetPlugin]] = None,
+    key_rename_map: Optional[dict[str, str]] = None,
+    load_videos: bool = True,
 ) -> WrappedRobotDataset:
     """Handles the logic of setting up delta timestamps and image transforms before creating a dataset.
 
     Args:
         cfg (TrainPipelineConfig): A TrainPipelineConfig config which contains a DatasetConfig and a PreTrainedConfig.
         plugins (Optional[list[DatasetPlugin]]): Optional list of plugins to attach to the dataset(s).
+        key_rename_map (Optional[dict[str, str]]): Optional mapping from source keys to target keys
+            for unifying datasets with different naming conventions. Example: {"action.pos": "action"}
+        load_videos (bool): Whether to download and load video files (default: True).
+            Set to False to skip video downloads when not needed.
 
     Returns:
         WrappedRobotDataset: A wrapped dataset with plugin support.
@@ -221,6 +231,7 @@ def make_dataset(
         observation_delta_indices=cfg.policy.observation_delta_indices,
         reward_delta_indices=cfg.policy.reward_delta_indices,
         use_imagenet_stats=cfg.dataset.use_imagenet_stats,
+        load_videos=load_videos,
     )
     
     # Wrap in WrappedRobotDataset with plugins
@@ -228,6 +239,7 @@ def make_dataset(
         datasets=datasets,
         plugins=plugins,
         image_transforms=image_transforms,
+        key_rename_map=key_rename_map,
     )
     
     return wrapped_dataset
@@ -243,6 +255,8 @@ def make_dataset_without_config(
     revision: str | None = None,
     use_imagenet_stats: bool = True,
     plugins: Optional[list[DatasetPlugin]] = None,
+    key_rename_map: Optional[dict[str, str]] = None,
+    load_videos: bool = True,
 ) -> WrappedRobotDataset:
     """Handles the logic of setting up delta timestamps and image transforms before creating a dataset.
 
@@ -259,6 +273,10 @@ def make_dataset_without_config(
         revision (str, optional): Dataset revision
         use_imagenet_stats (bool): Whether to use ImageNet normalization stats (default: True)
         plugins (Optional[list[DatasetPlugin]]): Optional list of plugins to attach to the dataset(s)
+        key_rename_map (Optional[dict[str, str]]): Optional mapping from source keys to target keys
+            for unifying datasets with different naming conventions. Example: {"action.pos": "action"}
+        load_videos (bool): Whether to download and load video files (default: True).
+            Set to False to skip video downloads when not needed.
 
     Returns:
         WrappedRobotDataset: A wrapped dataset with plugin support.
@@ -283,12 +301,14 @@ def make_dataset_without_config(
         action_delta_indices=action_delta_indices,
         observation_delta_indices=observation_delta_indices,
         use_imagenet_stats=use_imagenet_stats,
+        load_videos=load_videos,
     )
     
     # Wrap in WrappedRobotDataset with plugins
     wrapped_dataset = WrappedRobotDataset(
         datasets=datasets,
         plugins=plugins,
+        key_rename_map=key_rename_map,
     )
     
     return wrapped_dataset
