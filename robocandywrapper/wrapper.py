@@ -97,6 +97,7 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
             datasets=self._datasets,
             plugin_instances=self._plugin_instances,
             dataset_weights=dataset_weights,
+            dataset_renames=self._dataset_renames,
         )
 
         # ** MATCHING LeRobot MULTI-DATASET API DESIGN **
@@ -231,8 +232,11 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
         plugin_only_features = {}
         for key, value in self._meta.features.items():
             if key not in base_features:
-                plugin_only_features[key] = PolicyFeature(type=FeatureType.STATE, shape=value['shape'])
-        
+                if 'action' in key:
+                    plugin_only_features[key] = PolicyFeature(type=FeatureType.ACTION, shape=value['shape'])
+                else:
+                    plugin_only_features[key] = PolicyFeature(type=FeatureType.STATE, shape=value['shape'])
+
         return plugin_only_features
     
     @property

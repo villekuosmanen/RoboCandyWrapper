@@ -102,6 +102,7 @@ class WrappedRobotDatasetMetadataView:
         datasets: list,
         plugin_instances: list[list],
         dataset_weights: Optional[dict[str, float]] = None,
+        dataset_renames: Optional[list[dict[str, str]]] = None,
     ):
         """
         Initialize metadata view.
@@ -110,15 +111,32 @@ class WrappedRobotDatasetMetadataView:
             datasets: List of LeRobotDataset instances
             plugin_instances: List of plugin instances for each dataset
             dataset_weights: Optional weights for each dataset (for weighted stats)
+            dataset_renames: Optional list of rename dicts for each dataset,
+                mapping source_key -> target_key. Used to unify keys across
+                datasets with different naming conventions.
         """
         self._datasets = datasets
         self._plugin_instances = plugin_instances
         self._dataset_weights = dataset_weights or {}
+        self._dataset_renames = dataset_renames or [{} for _ in datasets]
         
         # Cache computed properties
         self._features = None
         self._stats = None
     
+    def _get_renamed_features(self, dataset_idx: int) -> dict[str, dict]:
+        """Get features from a dataset with key renames applied."""
+        dataset = self._datasets[dataset_idx]
+        renames = self._dataset_renames[dataset_idx]
+        
+        renamed_features = {}
+        for key, value in dataset.meta.features.items():
+            # Apply rename if applicable
+            effective_key = renames.get(key, key)
+            renamed_features[effective_key] = value
+        
+        return renamed_features
+
     @property
     def features(self) -> dict[str, dict]:
         """
@@ -127,6 +145,9 @@ class WrappedRobotDatasetMetadataView:
         Returns intersection of:
         1. Features from all datasets (taking intersection, not union)
         2. Features provided by plugins (added to intersection)
+        
+        Key renames are applied before computing the intersection, allowing
+        datasets with different naming conventions to be unified.
         """
         if self._features is not None:
             return self._features
@@ -135,12 +156,13 @@ class WrappedRobotDatasetMetadataView:
         if not self._datasets:
             all_features = {}
         else:
-            # Start with all features from first dataset
-            all_features = dict(self._datasets[0].meta.features)
+            # Start with all features from first dataset (with renames applied)
+            all_features = self._get_renamed_features(0)
             
             # Intersect with features from other datasets
-            for dataset in self._datasets[1:]:
-                dataset_feature_keys = set(dataset.meta.features.keys())
+            for i in range(1, len(self._datasets)):
+                dataset_features = self._get_renamed_features(i)
+                dataset_feature_keys = set(dataset_features.keys())
                 all_feature_keys = set(all_features.keys())
                 
                 # Keep only features that exist in both
@@ -166,6 +188,19 @@ class WrappedRobotDatasetMetadataView:
         self._features = all_features
         return self._features
     
+    def _get_renamed_stats(self, dataset_idx: int) -> dict[str, dict]:
+        """Get stats from a dataset with key renames applied."""
+        dataset = self._datasets[dataset_idx]
+        renames = self._dataset_renames[dataset_idx]
+        
+        renamed_stats = {}
+        for key, value in dataset.meta.stats.items():
+            # Apply rename if applicable
+            effective_key = renames.get(key, key)
+            renamed_stats[effective_key] = value
+        
+        return renamed_stats
+
     @property
     def stats(self) -> dict:
         """
@@ -174,12 +209,17 @@ class WrappedRobotDatasetMetadataView:
         If dataset_weights are provided, stats are computed as a weighted
         average based on effective dataset sizes (size * weight).
         Uses the correct statistical formula for combining variances.
+        
+        Key renames are applied before aggregation, so different source keys
+        (e.g., "action.pos" and "trajectory") that map to the same target key
+        (e.g., "action") will have their stats combined as if they were the
+        same key across all datasets.
         """
         if self._stats is not None:
             return self._stats
         
-        # Collect stats and weights for each dataset
-        stats_list = [dataset.meta.stats for dataset in self._datasets]
+        # Collect stats (with renames applied) and weights for each dataset
+        stats_list = [self._get_renamed_stats(i) for i in range(len(self._datasets))]
         
         # Get weight multiplier for each dataset
         weights = []
