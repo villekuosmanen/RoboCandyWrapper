@@ -59,7 +59,7 @@ def resolve_delta_timestamps(
     for key in ds_meta.features:
         if key == REWARD and reward_indices is not None:
             delta_timestamps[key] = _indices_to_times(reward_indices, ds_meta.fps)
-        if key == ACTION and action_indices is not None:
+        if key.startswith(ACTION) and action_indices is not None:
             delta_timestamps[key] = _indices_to_times(action_indices, ds_meta.fps)
         if key.startswith("observation.") and observation_indices is not None:
             delta_timestamps[key] = _indices_to_times(observation_indices, ds_meta.fps)
