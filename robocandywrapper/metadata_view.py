@@ -5,6 +5,39 @@ import logging
 from typing import Optional
 
 import numpy as np
+import pandas as pd
+
+
+def _task_names_from_meta_tasks(meta_tasks) -> set[str]:
+    """
+    Extract task name strings from a dataset's meta.tasks in either format.
+
+    - LeRobot 2.1 (dict): tasks is dict[task_index, task_name].
+    - LeRobot 3.0 (parquet/DataFrame): tasks is a pandas DataFrame where the
+      *row index* is the task name (string) and the only column is "task_index"
+      (integer). So: df.index = task names, df["task_index"] = indices.
+
+    Returns a set of unique task name strings.
+    """
+    if meta_tasks is None:
+        return set()
+    if isinstance(meta_tasks, dict):
+        return {str(v) for v in meta_tasks.values() if isinstance(v, str)}
+    # DataFrame or object with to_pandas() (e.g. HuggingFace Dataset)
+    df = None
+    if hasattr(meta_tasks, "to_pandas"):
+        df = meta_tasks.to_pandas()
+    elif isinstance(meta_tasks, pd.DataFrame):
+        df = meta_tasks
+    if df is None:
+        return set()
+    # 3.0 format: optional "task" column, else task names are the row index
+    if "task" in df.columns:
+        return set(df["task"].dropna().astype(str).unique())
+    if "task_index" in df.columns:
+        # Task names are the DataFrame index (row labels), not the column
+        return set(df.index.astype(str))
+    return set()
 
 
 def aggregate_stats_weighted(
@@ -241,7 +274,9 @@ class WrappedRobotDatasetMetadataView:
         Collated task index -> task name mapping across all datasets.
 
         Collects all unique task strings from every dataset that has a `tasks`
-        attribute on its meta (e.g. LeRobot v2.1 datasets). Assigns a unified
+        attribute on its meta. Supports both formats: LeRobot 2.1 (dict
+        task_index -> task name) and LeRobot 3.0 (parquet/pandas DataFrame with
+        "task" column, or object with to_pandas()). Assigns a unified
         task_index to each unique task name (sorted for determinism), so
         consumers get a single dict[int, str] suitable for _coerce_task_mapping
         and similar use.
@@ -252,10 +287,7 @@ class WrappedRobotDatasetMetadataView:
         all_task_names: set[str] = set()
         for dataset in self._datasets:
             meta_tasks = getattr(dataset.meta, "tasks", None)
-            if meta_tasks is not None and isinstance(meta_tasks, dict):
-                for _idx, name in meta_tasks.items():
-                    if isinstance(name, str):
-                        all_task_names.add(name)
+            all_task_names.update(_task_names_from_meta_tasks(meta_tasks))
 
         sorted_names = sorted(all_task_names)
         self._tasks = {idx: name for idx, name in enumerate(sorted_names)}
