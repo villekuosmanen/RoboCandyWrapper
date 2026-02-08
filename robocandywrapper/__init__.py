@@ -17,7 +17,7 @@ from robocandywrapper.constants import (
     EPISODE_OUTCOME_PLUGIN_NAME,
 )
 
-__version__ = "0.2.4"
+__version__ = "0.2.5"
 
 __all__ = [
     "DatasetPlugin",

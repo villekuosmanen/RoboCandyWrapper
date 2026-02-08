@@ -123,6 +123,7 @@ class WrappedRobotDatasetMetadataView:
         # Cache computed properties
         self._features = None
         self._stats = None
+        self._tasks = None
     
     def _get_renamed_features(self, dataset_idx: int) -> dict[str, dict]:
         """Get features from a dataset with key renames applied."""
@@ -233,7 +234,43 @@ class WrappedRobotDatasetMetadataView:
         self._stats = aggregate_stats_weighted(stats_list, weights)
         
         return self._stats
-    
+
+    @property
+    def tasks(self) -> dict[int, str]:
+        """
+        Collated task index -> task name mapping across all datasets.
+
+        Collects all unique task strings from every dataset that has a `tasks`
+        attribute on its meta (e.g. LeRobot v2.1 datasets). Assigns a unified
+        task_index to each unique task name (sorted for determinism), so
+        consumers get a single dict[int, str] suitable for _coerce_task_mapping
+        and similar use.
+        """
+        if self._tasks is not None:
+            return self._tasks
+
+        all_task_names: set[str] = set()
+        for dataset in self._datasets:
+            meta_tasks = getattr(dataset.meta, "tasks", None)
+            if meta_tasks is not None and isinstance(meta_tasks, dict):
+                for _idx, name in meta_tasks.items():
+                    if isinstance(name, str):
+                        all_task_names.add(name)
+
+        sorted_names = sorted(all_task_names)
+        self._tasks = {idx: name for idx, name in enumerate(sorted_names)}
+        return self._tasks
+
+    @property
+    def task_to_task_index(self) -> dict[str, int]:
+        """
+        Reverse mapping of tasks: task name -> unified task_index.
+
+        Matches the single-dataset meta API so code can use either
+        meta.tasks or meta.task_to_task_index.
+        """
+        return {name: idx for idx, name in self.tasks.items()}
+
     @property
     def repo_id(self) -> str:
         """Return a combined repo_id representing all datasets."""
