@@ -452,7 +452,7 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
             return None
         
         for instance in self._plugin_instances[dataset_idx]:
-            if isinstance(instance, plugin_type.attach(self._datasets[0]).__class__):
+            if isinstance(instance, plugin_type.attach(self._datasets[dataset_idx]).__class__):
                 # Check if the instance came from the right plugin type
                 # This is a bit hacky - better to store plugin class reference
                 pass
