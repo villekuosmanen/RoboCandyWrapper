@@ -684,8 +684,9 @@ class LeRobot21Dataset(torch.utils.data.Dataset):
         query_timestamps = {}
         for key in self.meta.video_keys:
             if query_indices is not None and key in query_indices:
-                timestamps = self.hf_dataset.select(query_indices[key])["timestamp"]
-                query_timestamps[key] = torch.stack(timestamps).tolist()
+                ts_col = self.hf_dataset.select(query_indices[key])["timestamp"]
+                ts_list = list(ts_col) if not isinstance(ts_col, list) else ts_col
+                query_timestamps[key] = [float(t) for t in ts_list]
             else:
                 query_timestamps[key] = [current_ts]
 

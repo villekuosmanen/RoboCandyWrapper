@@ -13,6 +13,7 @@ from .utils import (
     get_episode_data_index,
     check_timestamps_sync,
 )
+from .convert_v20_to_v21 import convert_dataset, convert_stats, convert_episode_stats
 
 __all__ = [
     "LeRobot21Dataset",
@@ -29,4 +30,7 @@ __all__ = [
     "backward_compatible_episodes_stats",
     "get_episode_data_index",
     "check_timestamps_sync",
+    "convert_dataset",
+    "convert_stats",
+    "convert_episode_stats",
 ]
