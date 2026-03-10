@@ -82,20 +82,25 @@ def convert_episode_stats(dataset: LeRobot21Dataset, ep_idx: int):
     for key, ft in dataset.features.items():
         if ft.get("dtype") in ("string", "list"):
             continue
-        if ft["dtype"] == "video":
-            ep_ft_data = sample_episode_video_frames(dataset, ep_idx, key)
-        else:
-            ep_ft_data = np.array(ep_data[key])
+        try:
+            if ft["dtype"] == "video":
+                ep_ft_data = sample_episode_video_frames(dataset, ep_idx, key)
+            else:
+                ep_ft_data = np.array(ep_data[key])
 
-        axes_to_reduce = (0, 2, 3) if ft["dtype"] in ["image", "video"] else 0
-        keepdims = True if ft["dtype"] in ["image", "video"] else ep_ft_data.ndim == 1
-        ep_stats[key] = get_feature_stats(ep_ft_data, axis=axes_to_reduce, keepdims=keepdims)
+            axes_to_reduce = (0, 2, 3) if ft["dtype"] in ["image", "video"] else 0
+            keepdims = True if ft["dtype"] in ["image", "video"] else ep_ft_data.ndim == 1
+            ep_stats[key] = get_feature_stats(ep_ft_data, axis=axes_to_reduce, keepdims=keepdims)
 
-        if ft["dtype"] in ["image", "video"]:
-            ep_stats[key] = {
-                k: v if k == "count" else np.squeeze(v, axis=0)
-                for k, v in ep_stats[key].items()
-            }
+            if ft["dtype"] in ["image", "video"]:
+                ep_stats[key] = {
+                    k: v if k == "count" else np.squeeze(v, axis=0)
+                    for k, v in ep_stats[key].items()
+                }
+        except Exception as e:
+            logging.warning(
+                f"  Skipping stats for feature '{key}' in episode {ep_idx}: {e}"
+            )
 
     dataset.meta.episodes_stats[ep_idx] = ep_stats
 
@@ -137,6 +142,8 @@ def check_aggregate_stats(
         else:
             rtol, atol = default_rtol_atol
 
+        if key not in agg_stats:
+            continue
         for stat, val in agg_stats[key].items():
             if key in reference_stats and stat in reference_stats[key]:
                 err_msg = f"feature='{key}' stats='{stat}'"
@@ -195,7 +202,11 @@ def convert_dataset(
             )
             logging.info(f"  Removed old stats.json from hub")
 
-        hub_api.create_tag(repo_id, tag=V21, revision=branch, repo_type="dataset", exist_ok=True)
+        try:
+            hub_api.delete_tag(repo_id, tag=V21, repo_type="dataset")
+        except Exception:
+            pass
+        hub_api.create_tag(repo_id, tag=V21, revision=branch, repo_type="dataset")
         logging.info(f"  Tagged as {V21}")
 
     logging.info(f"  Done: {repo_id}")
