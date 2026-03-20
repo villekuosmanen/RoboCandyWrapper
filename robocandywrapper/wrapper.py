@@ -642,11 +642,16 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
 
         # Fill missing image keys with zeros/noise
         if self._filled_image_keys:
-            # Find a reference image shape from an existing image key in this item
+            # Find a reference image shape from an existing image key
             ref_shape = None
             for k, v in item.items():
-                if hasattr(v, 'shape') and len(getattr(v, 'shape', ())) >= 3:
-                    ref_shape = v.shape
+                if not hasattr(v, 'shape'):
+                    continue
+                s = v.shape
+                # Match image tensors: 3+ dims, last dim is 3 (RGB) or 4 (RGBA),
+                # and spatial dims are reasonable (> 16 pixels)
+                if len(s) >= 3 and s[-1] in (3, 4) and s[-3] > 16 and s[-2] > 16:
+                    ref_shape = s
                     ref_dtype = v.dtype if hasattr(v, 'dtype') else torch.uint8
                     break
             for key in self._filled_image_keys:
