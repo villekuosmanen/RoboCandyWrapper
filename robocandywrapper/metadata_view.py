@@ -79,11 +79,25 @@ def aggregate_stats_weighted(
         if not stats_with_key:
             continue
         
-        # Extract arrays
-        means = np.stack([np.array(s["mean"]) for s in stats_with_key])
-        stds = np.stack([np.array(s["std"]) for s in stats_with_key])
-        mins = np.stack([np.array(s["min"]) for s in stats_with_key])
-        maxs = np.stack([np.array(s["max"]) for s in stats_with_key])
+        # Extract arrays, padding to max dim if shapes differ
+        def _to_arrays(stat_key, pad_value=0.0):
+            arrs = [np.array(s[stat_key]) for s in stats_with_key]
+            if any(a.shape != arrs[0].shape for a in arrs):
+                max_dim = max(a.shape[-1] for a in arrs if a.ndim > 0)
+                padded = []
+                for a in arrs:
+                    if a.ndim > 0 and a.shape[-1] < max_dim:
+                        pad_width = [(0, 0)] * (a.ndim - 1) + [(0, max_dim - a.shape[-1])]
+                        padded.append(np.pad(a, pad_width, constant_values=pad_value))
+                    else:
+                        padded.append(a)
+                return np.stack(padded)
+            return np.stack(arrs)
+
+        means = _to_arrays("mean", pad_value=0.0)
+        stds = _to_arrays("std", pad_value=1.0)
+        mins = _to_arrays("min", pad_value=0.0)
+        maxs = _to_arrays("max", pad_value=0.0)
         
         # Get counts and apply weight multipliers
         # Extract scalar count value (handle both scalar and array counts)
