@@ -24,6 +24,8 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
         error_on_key_conflicts: bool = True,
         dataset_weights: Optional[dict[str, float]] = None,
         key_rename_map: Optional[dict[str, str]] = None,
+        pad_to_max_dim: bool = False,
+        fill_missing_images: str = "disable",
         **kwargs
     ):
         """
@@ -44,6 +46,17 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
                 Note: When a key is renamed, any corresponding "_is_pad" key (added by
                 LeRobot when using delta_timestamps) is automatically renamed as well.
                 E.g., "action.pos" -> "action" also renames "action.pos_is_pad" -> "action_is_pad".
+            pad_to_max_dim: If True, features with different shapes across datasets
+                (e.g. 7-dim vs 14-dim actions) are zero-padded to the max dim instead
+                of raising an error. Adds ``action_dim_mask`` (bool tensor, True for
+                real dims) to each item so downstream loss functions can ignore the
+                padded dimensions.
+            fill_missing_images: How to handle image keys not present in all datasets.
+                - "disable" (default): remove the key entirely (original behaviour)
+                - "zeros": fill with a zero tensor of the same shape as other datasets
+                - "noise": fill with random noise (uniform [0, 255] uint8)
+                When set to "zeros" or "noise", an ``image_mask`` dict entry is also
+                added (True = real image, False = filled placeholder).
         """
         super().__init__()
         
@@ -52,6 +65,8 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
         self.image_transforms = image_transforms
         self.warn_on_key_conflicts = warn_on_key_conflicts
         self.error_on_key_conflicts = error_on_key_conflicts
+        self.pad_to_max_dim = pad_to_max_dim
+        self.fill_missing_images = fill_missing_images
         
         # Calculate dataset boundaries for flat index space
         self._dataset_lengths = []
@@ -102,60 +117,93 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
 
         # ** MATCHING LeRobot MULTI-DATASET API DESIGN **
         
-        # Disable any data keys that are not common across all of the datasets. Note: we may relax this
-        # restriction in future iterations of this class. For now, this is necessary at least for being able
-        # to use PyTorch's default DataLoader collate function.
-        #
-        # Key rename mapping is applied first (conceptually), so intersection is computed on
-        # "effective" features (post-rename). This allows datasets with different key names to be
-        # unified before the intersection check.
-        self.disabled_features = set()
-        intersection_features = self._get_effective_features(0)
+        # Compute feature intersection across datasets (post-rename).
+        # Image keys that are missing from some datasets can optionally be
+        # filled with zeros/noise instead of being disabled.
+        union_features = set()
+        all_ds_features = []
         for i in range(len(self._datasets)):
-            intersection_features.intersection_update(self._get_effective_features(i))
+            ef = self._get_effective_features(i)
+            all_ds_features.append(ef)
+            union_features.update(ef)
+
+        intersection_features = set.intersection(*all_ds_features) if all_ds_features else set()
+
         if len(intersection_features) == 0:
             raise RuntimeError(
                 "Multiple datasets were provided but they had no keys common to all of them. "
                 "The multi-dataset functionality currently only keeps common keys."
             )
-        for i, repo_id in enumerate(self.repo_ids):
-            effective_keys = self._get_effective_features(i)
-            extra_keys = effective_keys.difference(intersection_features)
-            if extra_keys:
-                logging.warning(
-                    f"keys {extra_keys} of {repo_id} were disabled as they are not contained in all the "
-                    "other datasets."
-                )
-            self.disabled_features.update(extra_keys)
 
-        # Validate that common features have compatible shapes
-        # Note: We need to look up the original key name for renamed keys
-        for key in intersection_features:
+        # Determine which non-common features to disable vs fill
+        self.disabled_features = set()
+        self._filled_image_keys: set[str] = set()  # image keys that need filling per-item
+
+        for i, repo_id in enumerate(self.repo_ids):
+            extra_keys = all_ds_features[i].difference(intersection_features)
+            for key in extra_keys:
+                is_image = "image" in key.lower() or "cam" in key.lower()
+                if is_image and self.fill_missing_images != "disable":
+                    self._filled_image_keys.add(key)
+                else:
+                    if key not in self._filled_image_keys:
+                        self.disabled_features.add(key)
+
+        # Promote filled image keys into the effective feature set
+        for key in self._filled_image_keys:
+            if key in self.disabled_features:
+                self.disabled_features.discard(key)
+
+        if self.disabled_features:
+            logging.warning(
+                f"Non-common features disabled: {self.disabled_features} "
+                f"(not in all datasets and not eligible for filling)"
+            )
+
+        active_features = intersection_features | self._filled_image_keys
+
+        # Validate shapes and compute padding info for active features
+        self._feature_max_dims: dict[str, int] = {}  # key -> max last-dim across datasets
+        self._per_dataset_dims: dict[str, dict[int, int]] = {}  # key -> {ds_idx: dim}
+
+        for key in active_features:
             shapes = []
-            shape_details = []
+            per_ds = {}
             for i, ds in enumerate(self._datasets):
-                # Find the original key (may be renamed)
                 renames = self._dataset_renames[i]
                 reverse_renames = {v: k for k, v in renames.items()}
                 original_key = reverse_renames.get(key, key)
-                
                 if original_key in ds.meta.features:
                     feature_shape = ds.meta.features[original_key].get('shape', [])
                     shapes.append(tuple(feature_shape))
-                    if original_key != key:
-                        shape_details.append(f"{ds.repo_id}: {feature_shape} (from '{original_key}')")
-                    else:
-                        shape_details.append(f"{ds.repo_id}: {feature_shape}")
-            
-            # Check if all shapes are the same
+                    if feature_shape:
+                        per_ds[i] = feature_shape[-1]
+
             unique_shapes = set(shapes)
             if len(unique_shapes) > 1:
-                raise ValueError(
-                    f"Incompatible shapes for feature '{key}' across datasets:\n" +
-                    "\n".join(f"  - {detail}" for detail in shape_details) +
-                    f"\n\nCannot mix datasets with different {key} dimensions. "
-                    f"This typically happens when mixing datasets from different robot configurations."
-                )
+                if self.pad_to_max_dim:
+                    max_dim = max(s[-1] for s in unique_shapes if s)
+                    self._feature_max_dims[key] = max_dim
+                    self._per_dataset_dims[key] = per_ds
+                    logging.info(
+                        f"Feature '{key}' has mixed dims {unique_shapes}; "
+                        f"padding to {max_dim} (pad_to_max_dim=True)"
+                    )
+                else:
+                    shape_details = []
+                    for i, ds in enumerate(self._datasets):
+                        renames = self._dataset_renames[i]
+                        reverse_renames = {v: k for k, v in renames.items()}
+                        original_key = reverse_renames.get(key, key)
+                        if original_key in ds.meta.features:
+                            feature_shape = ds.meta.features[original_key].get('shape', [])
+                            shape_details.append(f"{ds.repo_id}: {feature_shape}")
+                    raise ValueError(
+                        f"Incompatible shapes for feature '{key}' across datasets:\n" +
+                        "\n".join(f"  - {detail}" for detail in shape_details) +
+                        f"\n\nCannot mix datasets with different {key} dimensions. "
+                        f"Use pad_to_max_dim=True to zero-pad smaller dims."
+                    )
 
         # Keep backward compatible stats property
         self.stats = self._meta.stats
@@ -582,7 +630,6 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
         item["dataset_index"] = torch.tensor(dataset_idx)
         
         # Apply key renaming for this dataset (before filtering disabled features)
-        # This unifies differently-named keys across datasets
         renames = self._dataset_renames[dataset_idx]
         for source, target in renames.items():
             if source in item:
@@ -592,6 +639,48 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
         for data_key in self.disabled_features:
             if data_key in item:
                 del item[data_key]
+
+        # Fill missing image keys with zeros/noise
+        if self._filled_image_keys:
+            # Find a reference image shape from an existing image key in this item
+            ref_shape = None
+            for k, v in item.items():
+                if hasattr(v, 'shape') and len(getattr(v, 'shape', ())) >= 3:
+                    ref_shape = v.shape
+                    ref_dtype = v.dtype if hasattr(v, 'dtype') else torch.uint8
+                    break
+            for key in self._filled_image_keys:
+                if key not in item and ref_shape is not None:
+                    if self.fill_missing_images == "noise":
+                        item[key] = torch.randint(0, 256, ref_shape, dtype=torch.uint8)
+                    else:
+                        item[key] = torch.zeros(ref_shape, dtype=ref_dtype)
+
+        # Pad features with mismatched dims to the max dim across datasets
+        if self._feature_max_dims:
+            import numpy as np
+            for key, max_dim in self._feature_max_dims.items():
+                if key not in item:
+                    continue
+                val = item[key]
+                if not hasattr(val, 'shape'):
+                    continue
+                current_dim = val.shape[-1]
+                if current_dim < max_dim:
+                    pad_size = max_dim - current_dim
+                    if isinstance(val, torch.Tensor):
+                        pad = torch.zeros(*val.shape[:-1], pad_size, dtype=val.dtype)
+                        item[key] = torch.cat([val, pad], dim=-1)
+                    else:
+                        pad_widths = [(0, 0)] * (len(val.shape) - 1) + [(0, pad_size)]
+                        item[key] = np.pad(val, pad_widths, constant_values=0)
+
+                    # Add a dimension mask for action/state features
+                    if "action" in key.lower() or "state" in key.lower():
+                        mask_key = f"{key}_dim_mask"
+                        mask = torch.zeros(max_dim, dtype=torch.bool)
+                        mask[:current_dim] = True
+                        item[mask_key] = mask
         
         # Execute plugins sequentially, passing accumulated data
         for plugin_instance in self._plugin_instances[dataset_idx]:

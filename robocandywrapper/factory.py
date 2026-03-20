@@ -257,6 +257,8 @@ def make_dataset_without_config(
     plugins: Optional[list[DatasetPlugin]] = None,
     key_rename_map: Optional[dict[str, str]] = None,
     load_videos: bool = True,
+    pad_to_max_dim: bool = False,
+    fill_missing_images: str = "disable",
 ) -> WrappedRobotDataset:
     """Handles the logic of setting up delta timestamps and image transforms before creating a dataset.
 
@@ -304,11 +306,12 @@ def make_dataset_without_config(
         load_videos=load_videos,
     )
     
-    # Wrap in WrappedRobotDataset with plugins
     wrapped_dataset = WrappedRobotDataset(
         datasets=datasets,
         plugins=plugins,
         key_rename_map=key_rename_map,
+        pad_to_max_dim=pad_to_max_dim,
+        fill_missing_images=fill_missing_images,
     )
     
     return wrapped_dataset
