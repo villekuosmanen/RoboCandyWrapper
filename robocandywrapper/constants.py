@@ -10,4 +10,5 @@ AFFORDANCE_PLUGIN_NAME = "affordance"
 CONTROL_MODE_PLUGIN_NAME = "control_mode"
 EPISODE_OUTCOME_PLUGIN_NAME = "episode_outcome"
 SUBTASK_PLUGIN_NAME = "subtask"
+MOTION_PRIMITIVE_PLUGIN_NAME = "motion_primitives"
 

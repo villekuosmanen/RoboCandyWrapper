@@ -27,6 +27,9 @@ dependencies = [
     "torch>=2.0.0",
     "lerobot>=0.4,<0.5",
     "pandas>=1.3.0",
+    "lerobot-policy-diffusion-motion-primitives",
+    "motion-primitives",
+    "rewact_tools",
 ]
 
 [project.optional-dependencies]
@@ -45,6 +48,17 @@ Repository = "https://github.com/yourusername/RoboCandyWrapper"
 where = ["."]
 include = ["robocandywrapper*"]
 exclude = ["examples*", "tests*"]
+
+[tool.uv]
+override-dependencies = [
+    "pynput>=0.0.0; sys_platform == 'never'",
+    "evdev>=0.0.0; sys_platform == 'never'",
+]
+
+[tool.uv.sources]
+lerobot-policy-diffusion-motion-primitives = { path = "../../experimental/lerobot_policy_diffusion_motion_primitives", editable = true }
+motion-primitives = { path = "../../experimental/motion_primitives", editable = true }
+rewact-tools = { path = "../rewACT/rewact_tools", editable = true }
 
 [tool.black]
 line-length = 100

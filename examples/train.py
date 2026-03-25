@@ -39,6 +39,7 @@ Quick Start:
         --wandb.enable=false
 """
 import argparse
+import dataclasses
 import json
 import logging
 import os
@@ -50,19 +51,23 @@ from pprint import pformat
 from typing import Any
 
 import torch
+from accelerate import Accelerator
 from termcolor import colored
-from torch.amp import GradScaler
 from torch.optim import Optimizer
+from tqdm import tqdm
 
 from lerobot.configs import parser
 from lerobot.configs.train import TrainPipelineConfig
+from lerobot.datasets.sampler import EpisodeAwareSampler
 from lerobot.datasets.utils import cycle
-from lerobot.envs.factory import make_env
+from lerobot.envs.factory import make_env, make_env_pre_post_processors
+from lerobot.envs.utils import close_envs
 from lerobot.optim.factory import make_optimizer_and_scheduler
-from lerobot.policies.factory import make_policy, make_pre_post_processors
+from lerobot.policies.factory import make_policy
+from rewact_tools import make_pre_post_processors
 from lerobot.policies.pretrained import PreTrainedPolicy
-from lerobot.policies.utils import get_device_from_parameters
-from lerobot.rl.eval_policy import eval_policy
+from lerobot.scripts.lerobot_eval import eval_policy_all
+from lerobot.utils.import_utils import register_third_party_plugins
 from lerobot.utils.logging_utils import AverageMeter, MetricsTracker
 from lerobot.utils.random_utils import set_seed
 from lerobot.utils.train_utils import (
@@ -74,15 +79,19 @@ from lerobot.utils.train_utils import (
 )
 from lerobot.utils.utils import (
     format_big_number,
-    get_safe_torch_device,
     has_method,
     init_logging,
+    inside_slurm,
 )
 
 from robocandywrapper.factory import make_dataset
+from robocandywrapper.plugins import EpisodeOutcomePlugin, ControlModePlugin
 from robocandywrapper.samplers import make_sampler
 from robocandywrapper.samplers.factory import load_sampler_config
 from robocandywrapper.utils import WandBLogger
+
+import lerobot_policy_diffusion_motion_primitives  # noqa: F401 — registers diffusion_mp policy
+from motion_primitives.plugin import MotionPrimitivePlugin
 
 
 def update_policy(
@@ -91,44 +100,40 @@ def update_policy(
     batch: Any,
     optimizer: Optimizer,
     grad_clip_norm: float,
-    grad_scaler: GradScaler,
+    accelerator: Accelerator,
     lr_scheduler=None,
-    use_amp: bool = False,
     lock=None,
 ) -> tuple[MetricsTracker, dict]:
+    """
+    Performs a single training step to update the policy's weights.
+
+    Uses Accelerator for mixed-precision training and distributed gradient handling.
+    """
     start_time = time.perf_counter()
-    device = get_device_from_parameters(policy)
     policy.train()
-    with torch.autocast(device_type=device.type) if use_amp else nullcontext():
+
+    with accelerator.autocast():
         loss, output_dict = policy.forward(batch)
-        # TODO(rcadene): policy.unnormalize_outputs(out_dict)
-    grad_scaler.scale(loss).backward()
 
-    # Unscale the gradient of the optimizer's assigned params in-place **prior to gradient clipping**.
-    grad_scaler.unscale_(optimizer)
+    accelerator.backward(loss)
 
-    grad_norm = torch.nn.utils.clip_grad_norm_(
-        policy.parameters(),
-        grad_clip_norm,
-        error_if_nonfinite=False,
-    )
+    if grad_clip_norm > 0:
+        grad_norm = accelerator.clip_grad_norm_(policy.parameters(), grad_clip_norm)
+    else:
+        grad_norm = torch.nn.utils.clip_grad_norm_(
+            policy.parameters(), float("inf"), error_if_nonfinite=False
+        )
 
-    # Optimizer's gradients are already unscaled, so scaler.step does not unscale them,
-    # although it still skips optimizer.step() if the gradients contain infs or NaNs.
     with lock if lock is not None else nullcontext():
-        grad_scaler.step(optimizer)
-    # Updates the scale for next iteration.
-    grad_scaler.update()
+        optimizer.step()
 
     optimizer.zero_grad()
 
-    # Step through pytorch scheduler at every batch instead of epoch
     if lr_scheduler is not None:
         lr_scheduler.step()
 
-    if has_method(policy, "update"):
-        # To possibly update an internal buffer (for instance an Exponential Moving Average like in TDMPC).
-        policy.update()
+    if has_method(accelerator.unwrap_model(policy, keep_fp32_wrapper=True), "update"):
+        accelerator.unwrap_model(policy, keep_fp32_wrapper=True).update()
 
     train_metrics.loss = loss.item()
     train_metrics.grad_norm = grad_norm.item()
@@ -138,76 +143,93 @@ def update_policy(
 
 
 @parser.wrap()
-def train(cfg: TrainPipelineConfig):
+def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
     cfg.validate()
-    logging.info(pformat(cfg.to_dict()))
 
-    if cfg.wandb.enable and cfg.wandb.project:
+    if accelerator is None:
+        from accelerate.utils import DistributedDataParallelKwargs
+
+        ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
+        force_cpu = cfg.policy.device == "cpu"
+        accelerator = Accelerator(
+            step_scheduler_with_optimizer=False,
+            kwargs_handlers=[ddp_kwargs],
+            cpu=force_cpu,
+        )
+
+    init_logging(accelerator=accelerator)
+
+    is_main_process = accelerator.is_main_process
+
+    if is_main_process:
+        logging.info(pformat(cfg.to_dict()))
+
+    if cfg.wandb.enable and cfg.wandb.project and is_main_process:
         wandb_logger = WandBLogger(cfg)
     else:
         wandb_logger = None
-        logging.info(colored("Logs will be saved locally.", "yellow", attrs=["bold"]))
+        if is_main_process:
+            logging.info(colored("Logs will be saved locally.", "yellow", attrs=["bold"]))
 
     if cfg.seed is not None:
-        set_seed(cfg.seed)
+        set_seed(cfg.seed, accelerator=accelerator)
 
-    # Check device is available
-    device = get_safe_torch_device(cfg.policy.device, log=True)
-    torch.backends.cudnn.benchmark = True
+    device = accelerator.device
     torch.backends.cuda.matmul.allow_tf32 = True
 
-    # Load sampler config for extracting episodes
-    sampler_config = load_sampler_config()    
-    # If sampler config has episodes, inject them into cfg.dataset before creating dataset
+    # --- RoboCandyWrapper: sampler config & dataset ---
+    sampler_config = load_sampler_config()
     if sampler_config is not None and sampler_config.episodes is not None:
         cfg.dataset.episodes = sampler_config.episodes
-        logging.info(f"Using episode selection from sampler config: {sampler_config.episodes}")
-    
-    logging.info("Creating dataset")
-    dataset = make_dataset(cfg)
-    # TODO hack, do not use
-    # dataset.meta.features['observation.eef_6d_pose']= {
-    #     'dtype': "float32",
-    #     'shape': (7,),
-    # }
-    # # Update stats to match the new shape by appending the last element from observation.state
-    # import numpy as np
-    # for stat_key in ['min', 'max', 'mean', 'std']:
-    #     dataset.meta.stats['observation.eef_6d_pose'][stat_key] = np.concatenate([
-    #         dataset.meta.stats['observation.eef_6d_pose'][stat_key],
-    #         dataset.meta.stats['observation.state'][stat_key][-1:]
-    #     ])
+        if is_main_process:
+            logging.info(f"Using episode selection from sampler config: {sampler_config.episodes}")
 
-    # Create sampler for the dataset using above-loaded config
+    plugins = [EpisodeOutcomePlugin(), ControlModePlugin(), MotionPrimitivePlugin()]
+
+    if is_main_process:
+        logging.info("Creating dataset")
+        dataset = make_dataset(cfg, plugins=plugins)
+
+    accelerator.wait_for_everyone()
+
+    if not is_main_process:
+        dataset = make_dataset(cfg, plugins=plugins)
+
+    # --- RoboCandyWrapper: custom sampler ---
     sampler, shuffle, dataset_weights, episodes = make_sampler(dataset, sampler_config=sampler_config)
-    
-    # Update dataset metadata with weights from sampler config
+
     if dataset_weights is not None:
         dataset.update_dataset_weights(dataset_weights)
-        logging.info("Updated dataset metadata with sampler weights")
+        if is_main_process:
+            logging.info("Updated dataset metadata with sampler weights")
 
-    # Create environment used for evaluating checkpoints during training on simulation data.
-    # On real-world data, no need to create an environment as evaluations are done outside train.py,
-    # using the eval.py instead, with gym_dora environment and dora-rs.
+    # Evaluation environment
     eval_env = None
-    if cfg.eval_freq > 0 and cfg.env is not None:
+    if cfg.eval_freq > 0 and cfg.env is not None and is_main_process:
         logging.info("Creating env")
         eval_env = make_env(cfg.env, n_envs=cfg.eval.batch_size, use_async_envs=cfg.eval.use_async_envs)
 
-    logging.info("Creating policy")
+    if is_main_process:
+        logging.info("Creating policy")
     policy = make_policy(
         cfg=cfg.policy,
         ds_meta=dataset.meta,
+        rename_map=cfg.rename_map,
     )
 
-    # Create processors - only provide dataset_stats if not resuming from saved processors
+    if cfg.peft is not None:
+        logging.info("Using PEFT! Wrapping model.")
+        peft_cli_overrides = dataclasses.asdict(cfg.peft)
+        policy = policy.wrap_with_peft(peft_cli_overrides=peft_cli_overrides)
+
+    accelerator.wait_for_everyone()
+
+    # Create processors
     processor_kwargs = {}
     postprocessor_kwargs = {}
     if (cfg.policy.pretrained_path and not cfg.resume) or not cfg.policy.pretrained_path:
-        # Only provide dataset_stats when not resuming from saved processor state
         processor_kwargs["dataset_stats"] = dataset.meta.stats
 
-    # For SARM, always provide dataset_meta for progress normalization
     if cfg.policy.type == "sarm":
         processor_kwargs["dataset_meta"] = dataset.meta
 
@@ -230,18 +252,20 @@ def train(cfg: TrainPipelineConfig):
                 "norm_map": policy.config.normalization_mapping,
             },
         }
+
     preprocessor, postprocessor = make_pre_post_processors(
         policy_cfg=cfg.policy,
         pretrained_path=cfg.policy.pretrained_path,
+        plugin_features=dataset.plugin_features,
         **processor_kwargs,
         **postprocessor_kwargs,
     )
 
-    logging.info("Creating optimizer and scheduler")
+    if is_main_process:
+        logging.info("Creating optimizer and scheduler")
     optimizer, lr_scheduler = make_optimizer_and_scheduler(cfg, policy)
-    grad_scaler = GradScaler(device.type, enabled=cfg.policy.use_amp)
 
-    step = 0  # number of policy updates (forward + backward + optim)
+    step = 0
 
     if cfg.resume:
         step, optimizer, lr_scheduler = load_training_state(cfg.checkpoint_path, optimizer, lr_scheduler)
@@ -249,24 +273,56 @@ def train(cfg: TrainPipelineConfig):
     num_learnable_params = sum(p.numel() for p in policy.parameters() if p.requires_grad)
     num_total_params = sum(p.numel() for p in policy.parameters())
 
-    logging.info(colored("Output dir:", "yellow", attrs=["bold"]) + f" {cfg.output_dir}")
-    if cfg.env is not None:
-        logging.info(f"{cfg.env.task=}")
-    logging.info(f"{cfg.steps=} ({format_big_number(cfg.steps)})")
-    logging.info(f"{dataset.num_frames=} ({format_big_number(dataset.num_frames)})")
-    logging.info(f"{dataset.num_episodes=}")
-    logging.info(f"{num_learnable_params=} ({format_big_number(num_learnable_params)})")
-    logging.info(f"{num_total_params=} ({format_big_number(num_total_params)})")
+    if is_main_process:
+        logging.info(colored("Output dir:", "yellow", attrs=["bold"]) + f" {cfg.output_dir}")
+        if cfg.env is not None:
+            logging.info(f"{cfg.env.task=}")
+            logging.info("Creating environment processors")
+            env_preprocessor, env_postprocessor = make_env_pre_post_processors(
+                env_cfg=cfg.env, policy_cfg=cfg.policy
+            )
+        logging.info(f"{cfg.steps=} ({format_big_number(cfg.steps)})")
+        logging.info(f"{dataset.num_frames=} ({format_big_number(dataset.num_frames)})")
+        logging.info(f"{dataset.num_episodes=}")
+        num_processes = accelerator.num_processes
+        effective_bs = cfg.batch_size * num_processes
+        logging.info(f"Effective batch size: {cfg.batch_size} x {num_processes} = {effective_bs}")
+        logging.info(f"{num_learnable_params=} ({format_big_number(num_learnable_params)})")
+        logging.info(f"{num_total_params=} ({format_big_number(num_total_params)})")
 
-    # Create dataloader for the dataset
+    # --- Dataloader ---
+    # Use RoboCandyWrapper sampler if available, otherwise fall back to EpisodeAwareSampler
+    # if sampler is not None:
+    #     # RoboCandyWrapper custom sampler takes priority
+    #     dl_shuffle = shuffle
+    #     dl_sampler = sampler
+    # elif hasattr(cfg.policy, "drop_n_last_frames"):
+    #     dl_shuffle = False
+    #     dl_sampler = EpisodeAwareSampler(
+    #         dataset.meta.episodes["dataset_from_index"],
+    #         dataset.meta.episodes["dataset_to_index"],
+    #         episode_indices_to_use=dataset.episodes,
+    #         drop_n_last_frames=cfg.policy.drop_n_last_frames,
+    #         shuffle=True,
+    #     )
+    # else:
+    #     dl_shuffle = True
+    #     dl_sampler = None
+
     dataloader = torch.utils.data.DataLoader(
         dataset,
         num_workers=cfg.num_workers,
         batch_size=cfg.batch_size,
-        shuffle=shuffle,
-        sampler=sampler,
+        shuffle=True,
+        # sampler=dl_sampler,
         pin_memory=device.type == "cuda",
         drop_last=False,
+        prefetch_factor=4 if cfg.num_workers > 0 else None,
+    )
+
+    accelerator.wait_for_everyone()
+    policy, optimizer, dataloader, lr_scheduler = accelerator.prepare(
+        policy, optimizer, dataloader, lr_scheduler
     )
     dl_iter = cycle(dataloader)
 
@@ -280,20 +336,34 @@ def train(cfg: TrainPipelineConfig):
         "dataloading_s": AverageMeter("data_s", ":.3f"),
     }
 
+    effective_batch_size = cfg.batch_size * accelerator.num_processes
     train_tracker = MetricsTracker(
-        cfg.batch_size, dataset.num_frames, dataset.num_episodes, train_metrics, initial_step=step
+        cfg.batch_size,
+        dataset.num_frames,
+        dataset.num_episodes,
+        train_metrics,
+        initial_step=step,
+        accelerator=accelerator,
     )
 
-    logging.info("Start offline training on a fixed dataset")
+    if is_main_process:
+        progbar = tqdm(
+            total=cfg.steps - step,
+            desc="Training",
+            unit="step",
+            disable=inside_slurm(),
+            position=0,
+            leave=True,
+        )
+        logging.info(
+            f"Start offline training on a fixed dataset, with effective batch size: {effective_batch_size}"
+        )
+
     for _ in range(step, cfg.steps):
         start_time = time.perf_counter()
         batch = next(dl_iter)
         batch = preprocessor(batch)
         train_tracker.dataloading_s = time.perf_counter() - start_time
-
-        for key in batch:
-            if isinstance(batch[key], torch.Tensor):
-                batch[key] = batch[key].to(device, non_blocking=device.type == "cuda")
 
         train_tracker, output_dict = update_policy(
             train_tracker,
@@ -301,16 +371,15 @@ def train(cfg: TrainPipelineConfig):
             batch,
             optimizer,
             cfg.optimizer.grad_clip_norm,
-            grad_scaler=grad_scaler,
+            accelerator=accelerator,
             lr_scheduler=lr_scheduler,
-            use_amp=cfg.policy.use_amp,
         )
 
-        # Note: eval and checkpoint happens *after* the `step`th training update has completed, so we
-        # increment `step` here.
         step += 1
+        if is_main_process:
+            progbar.update(1)
         train_tracker.step()
-        is_log_step = cfg.log_freq > 0 and step % cfg.log_freq == 0
+        is_log_step = cfg.log_freq > 0 and step % cfg.log_freq == 0 and is_main_process
         is_saving_step = step % cfg.save_freq == 0 or step == cfg.steps
         is_eval_step = cfg.eval_freq > 0 and step % cfg.eval_freq == 0
 
@@ -324,74 +393,102 @@ def train(cfg: TrainPipelineConfig):
             train_tracker.reset_averages()
 
         if cfg.save_checkpoint and is_saving_step:
-            logging.info(f"Checkpoint policy after step {step}")
-            checkpoint_dir = get_step_checkpoint_dir(cfg.output_dir, cfg.steps, step)
-            save_checkpoint(
-                checkpoint_dir=checkpoint_dir,
-                step=step,
-                cfg=cfg,
-                policy=policy,
-                optimizer=optimizer,
-                scheduler=lr_scheduler,
-                preprocessor=preprocessor,
-                postprocessor=postprocessor,
-            )
-            update_last_checkpoint(checkpoint_dir)
-            if wandb_logger:
-                wandb_logger.log_policy(checkpoint_dir)
+            if is_main_process:
+                logging.info(f"Checkpoint policy after step {step}")
+                checkpoint_dir = get_step_checkpoint_dir(cfg.output_dir, cfg.steps, step)
+                save_checkpoint(
+                    checkpoint_dir=checkpoint_dir,
+                    step=step,
+                    cfg=cfg,
+                    policy=accelerator.unwrap_model(policy),
+                    optimizer=optimizer,
+                    scheduler=lr_scheduler,
+                    preprocessor=preprocessor,
+                    postprocessor=postprocessor,
+                )
+                update_last_checkpoint(checkpoint_dir)
+                if wandb_logger:
+                    wandb_logger.log_policy(checkpoint_dir)
+
+            accelerator.wait_for_everyone()
 
         if cfg.env and is_eval_step:
-            step_id = get_step_identifier(step, cfg.steps)
-            logging.info(f"Eval policy at step {step}")
-            with (
-                torch.no_grad(),
-                torch.autocast(device_type=device.type) if cfg.policy.use_amp else nullcontext(),
-            ):
-                eval_info = eval_policy(
-                    eval_env,
-                    policy,
-                    cfg.eval.n_episodes,
-                    videos_dir=cfg.output_dir / "eval" / f"videos_step_{step_id}",
-                    max_episodes_rendered=4,
-                    start_seed=cfg.seed,
-                )
+            if is_main_process:
+                step_id = get_step_identifier(step, cfg.steps)
+                logging.info(f"Eval policy at step {step}")
+                with torch.no_grad(), accelerator.autocast():
+                    eval_info = eval_policy_all(
+                        envs=eval_env,
+                        policy=accelerator.unwrap_model(policy),
+                        env_preprocessor=env_preprocessor,
+                        env_postprocessor=env_postprocessor,
+                        preprocessor=preprocessor,
+                        postprocessor=postprocessor,
+                        n_episodes=cfg.eval.n_episodes,
+                        videos_dir=cfg.output_dir / "eval" / f"videos_step_{step_id}",
+                        max_episodes_rendered=4,
+                        start_seed=cfg.seed,
+                        max_parallel_tasks=cfg.env.max_parallel_tasks,
+                    )
+                aggregated = eval_info["overall"]
 
-            eval_metrics = {
-                "avg_sum_reward": AverageMeter("∑rwrd", ":.3f"),
-                "pc_success": AverageMeter("success", ":.1f"),
-                "eval_s": AverageMeter("eval_s", ":.3f"),
-            }
-            eval_tracker = MetricsTracker(
-                cfg.batch_size, dataset.num_frames, dataset.num_episodes, eval_metrics, initial_step=step
-            )
-            eval_tracker.eval_s = eval_info["aggregated"].pop("eval_s")
-            eval_tracker.avg_sum_reward = eval_info["aggregated"].pop("avg_sum_reward")
-            eval_tracker.pc_success = eval_info["aggregated"].pop("pc_success")
-            logging.info(eval_tracker)
-            if wandb_logger:
-                wandb_log_dict = {**eval_tracker.to_dict(), **eval_info}
-                wandb_logger.log_dict(wandb_log_dict, step, mode="eval")
-                wandb_logger.log_video(eval_info["video_paths"][0], step, mode="eval")
+                for suite, suite_info in eval_info.items():
+                    logging.info("Suite %s aggregated: %s", suite, suite_info)
+
+                eval_metrics = {
+                    "avg_sum_reward": AverageMeter("∑rwrd", ":.3f"),
+                    "pc_success": AverageMeter("success", ":.1f"),
+                    "eval_s": AverageMeter("eval_s", ":.3f"),
+                }
+                eval_tracker = MetricsTracker(
+                    cfg.batch_size,
+                    dataset.num_frames,
+                    dataset.num_episodes,
+                    eval_metrics,
+                    initial_step=step,
+                    accelerator=accelerator,
+                )
+                eval_tracker.eval_s = aggregated.pop("eval_s")
+                eval_tracker.avg_sum_reward = aggregated.pop("avg_sum_reward")
+                eval_tracker.pc_success = aggregated.pop("pc_success")
+                if wandb_logger:
+                    wandb_log_dict = {**eval_tracker.to_dict(), **eval_info}
+                    wandb_logger.log_dict(wandb_log_dict, step, mode="eval")
+                    wandb_logger.log_video(eval_info["overall"]["video_paths"][0], step, mode="eval")
+
+            accelerator.wait_for_everyone()
+
+    if is_main_process:
+        progbar.close()
 
     if eval_env:
-        eval_env.close()
-    logging.info("End of training")
+        close_envs(eval_env)
 
-    if cfg.policy.push_to_hub:
-        # Format datasets properly for YAML frontmatter
-        if cfg.dataset.repo_id.startswith('[') and cfg.dataset.repo_id.endswith(']'):
-            # Handle multiple datasets: "[dataset1, dataset2]" -> ["dataset1", "dataset2"]
-            datasets_str = cfg.dataset.repo_id.strip('[]')
-            datasets = [ds.strip('\'\" ') for ds in datasets_str.split(',')]
-            cfg.dataset.repo_id = datasets
-        policy.push_model_to_hub(cfg)
-        preprocessor.push_to_hub(cfg.policy.repo_id)
-        postprocessor.push_to_hub(cfg.policy.repo_id)
+    if is_main_process:
+        logging.info("End of training")
+
+        if cfg.policy.push_to_hub:
+            unwrapped_policy = accelerator.unwrap_model(policy)
+            # Format datasets properly for YAML frontmatter
+            if isinstance(cfg.dataset.repo_id, str) and cfg.dataset.repo_id.startswith('[') and cfg.dataset.repo_id.endswith(']'):
+                datasets_str = cfg.dataset.repo_id.strip('[]')
+                datasets = [ds.strip('\'\" ') for ds in datasets_str.split(',')]
+                cfg.dataset.repo_id = datasets
+            if cfg.policy.use_peft:
+                unwrapped_policy.push_model_to_hub(cfg, peft_model=unwrapped_policy)
+            else:
+                unwrapped_policy.push_model_to_hub(cfg)
+            preprocessor.push_to_hub(cfg.policy.repo_id)
+            postprocessor.push_to_hub(cfg.policy.repo_id)
+
+    accelerator.wait_for_everyone()
+    accelerator.end_training()
 
 
 def main():
     init_logging()
-    
+    register_third_party_plugins()
+
     # Parse custom arguments for sampler config
     custom_parser = argparse.ArgumentParser(add_help=False)
     custom_parser.add_argument(
@@ -400,45 +497,36 @@ def main():
         default=None,
         help="Path to sampler configuration JSON file"
     )
-    
-    # Parse known args to extract our custom ones
+
     custom_args, remaining_args = custom_parser.parse_known_args()
-    
-    # Set environment variable and extract dataset repo_ids if sampler config is provided
+
     if custom_args.sampler_config_path:
         os.environ["SAMPLER_CONFIG_PATH"] = custom_args.sampler_config_path
         logging.info(f"Using sampler config: {custom_args.sampler_config_path}")
-        
-        # Extract dataset repo_ids from sampler config
+
         try:
             config_path = Path(custom_args.sampler_config_path)
             if config_path.exists():
                 with open(config_path, 'r') as f:
                     sampler_data = json.load(f)
-                
-                # Extract repo_ids from dataset_weights keys
+
                 if 'dataset_weights' in sampler_data and sampler_data['dataset_weights']:
                     repo_ids = list(sampler_data['dataset_weights'].keys())
-                    
-                    # Check if --dataset.repo_id is already in remaining_args
                     has_repo_id = any('--dataset.repo_id' in arg for arg in remaining_args)
-                    
+
                     if not has_repo_id:
-                        # Format as list and add to arguments
                         repo_ids_str = f"[{','.join(repo_ids)}]"
                         remaining_args.extend(['--dataset.repo_id', repo_ids_str])
                         logging.info(f"Auto-detected datasets from sampler config: {repo_ids}")
         except Exception as e:
             logging.warning(f"Could not extract dataset repo_ids from sampler config: {e}")
-    
-    # Set default push_to_hub=false if not specified (to avoid requiring repo_id)
+
     has_push_to_hub = any('--policy.push_to_hub' in arg for arg in remaining_args)
     if not has_push_to_hub:
         remaining_args.extend(['--policy.push_to_hub=false'])
-    
-    # Update sys.argv to only include remaining args for draccus
+
     sys.argv = [sys.argv[0]] + remaining_args
-    
+
     train()
 
 

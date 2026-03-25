@@ -43,6 +43,22 @@ class ControlModePlugin(DatasetPlugin):
         return ControlModeInstance(dataset, self)
 
 
+def _calculate_episode_data_index(hf_dataset) -> dict[str, torch.Tensor]:
+    """Calculate episode data index from hf_dataset's episode_index column."""
+    episode_data_index: dict[str, list[int]] = {"from": [], "to": []}
+    if len(hf_dataset) == 0:
+        return {"from": torch.tensor([]), "to": torch.tensor([])}
+    current_episode = None
+    for idx, episode_idx in enumerate(hf_dataset["episode_index"]):
+        if episode_idx != current_episode:
+            episode_data_index["from"].append(idx)
+            if current_episode is not None:
+                episode_data_index["to"].append(idx)
+            current_episode = episode_idx
+    episode_data_index["to"].append(idx + 1)
+    return {k: torch.tensor(v) for k, v in episode_data_index.items()}
+
+
 class ControlModeInstance(PluginInstance):
     """Dataset-specific control mode labels."""
 
@@ -50,10 +66,18 @@ class ControlModeInstance(PluginInstance):
         super().__init__(dataset)
         self.config = config
         self.episode_modes: dict[int, list[ControlModeSegment]] = {}
+        self._cached_episode_data_index: dict[str, torch.Tensor] | None = None
         self._load()
 
+    def _get_episode_data_index(self) -> dict[str, torch.Tensor]:
+        if hasattr(self.dataset, 'episode_data_index'):
+            return self.dataset.episode_data_index
+        if self._cached_episode_data_index is None:
+            self._cached_episode_data_index = _calculate_episode_data_index(self.dataset.hf_dataset)
+        return self._cached_episode_data_index
+
     def get_data_keys(self) -> list[str]:
-        return ["control_mode", "control_mode_is_human"]
+        return ["control_mode", "control_mode_autonomous"]
 
     def get_item_data(
         self,
@@ -64,7 +88,7 @@ class ControlModeInstance(PluginInstance):
         mode = self._get_mode_for_frame(idx, episode_idx)
         return {
             "control_mode": mode,
-            "control_mode_is_human": torch.tensor(mode == "human", dtype=torch.bool),
+            "control_mode_autonomous": torch.tensor(mode == "policy", dtype=torch.bool),
         }
 
     # ── loading ────────────────────────────────────────────────────────
@@ -73,9 +97,12 @@ class ControlModeInstance(PluginInstance):
         dataset_root = Path(self.dataset.root)
         cw = dataset_root / CANDYWRAPPER_PLUGINS_DIR
         legacy = cw / "dagger_data_source" / "episode_modes.json"
+        legacy_2 = dataset_root / "dagger_data_source" / "episode_modes.json"
         current = cw / CONTROL_MODE_PLUGIN_NAME / "episode_modes.json"
         if legacy.exists():
             return legacy
+        if legacy_2.exists():
+            return legacy_2
         if current.exists():
             return current
         return None
@@ -115,7 +142,8 @@ class ControlModeInstance(PluginInstance):
         if segs is None:
             return "unknown"
 
-        ep_start = self.dataset.meta.episodes[episode_idx]["dataset_from_index"]
+        ep_data_index = self._get_episode_data_index()
+        ep_start = ep_data_index["from"][episode_idx].item()
         frame_in_ep = idx - ep_start
 
         for seg in segs:
