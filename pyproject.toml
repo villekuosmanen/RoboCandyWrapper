@@ -7,7 +7,7 @@ name = "robocandywrapper"
 version = "0.2.12"
 description = "Sweet wrappers for extending and remixing LeRobot Datasets"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.11"
 license = {file = "LICENSE"}
 authors = [
     {name = "RoboCandyWrapper Contributors"}

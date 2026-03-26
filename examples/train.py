@@ -50,6 +50,7 @@ from pathlib import Path
 from pprint import pformat
 from typing import Any
 
+import numpy as np
 import torch
 from accelerate import Accelerator
 from termcolor import colored
@@ -188,12 +189,32 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
 
     if is_main_process:
         logging.info("Creating dataset")
-        dataset = make_dataset(cfg, plugins=plugins)
+        dataset = make_dataset(
+            cfg,
+            plugins=plugins,
+            key_rename_map={
+                'observation.state': 'observation.state.pos',
+                'action': 'action.pos',
+                'observation.eef_6d_pose': 'observation.state',
+                'action.eef_pose': 'action',
+            },
+        )
 
     accelerator.wait_for_everyone()
 
     if not is_main_process:
         dataset = make_dataset(cfg, plugins=plugins)
+
+    dataset.meta.features['observation.state']= {
+        'dtype': "float32",
+        'shape': (7,),
+    }
+    # Update stats to match the new shape by appending the last element from observation.state
+    for stat_key in ['min', 'max', 'mean', 'std']:
+        dataset.meta.stats['observation.state'][stat_key] = np.concatenate([
+            dataset.meta.stats['observation.state'][stat_key],
+            dataset.meta.stats['observation.state.pos'][stat_key][-1:]
+        ])
 
     # --- RoboCandyWrapper: custom sampler ---
     sampler, shuffle, dataset_weights, episodes = make_sampler(dataset, sampler_config=sampler_config)
@@ -253,10 +274,55 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
             },
         }
 
+    # Load per-timestep delta action stats if the policy uses delta actions
+    delta_norm_stats = None
+    if getattr(cfg.policy, "use_delta_actions", False):
+        # Look for delta_norm_stats.json in the first underlying dataset's root
+        ds_root = dataset._datasets[0].root
+        delta_stats_path = ds_root / "meta" / "delta_norm_stats.json"
+        if delta_stats_path.exists():
+            with open(delta_stats_path) as _f:
+                delta_norm_stats = json.load(_f)
+
+            # Remap delta stats keys to match the canonical names after the
+            # dataset's key_rename_map has been applied.  The stats file uses
+            # the raw dataset column names (e.g. "action.eef_pose") but the
+            # preprocessor expects the renamed keys (e.g. "action").
+            rename_map = dataset.key_rename_map
+            if rename_map:
+                remapped = {}
+                for key, block in delta_norm_stats.items():
+                    new_key = rename_map.get(key, key)
+                    if "state_key" in block:
+                        block["state_key"] = rename_map.get(block["state_key"], block["state_key"])
+                    remapped[new_key] = block
+                delta_norm_stats = remapped
+
+            if is_main_process:
+                logging.info(
+                    "Loaded delta norm stats from %s (keys: %s)",
+                    delta_stats_path, list(delta_norm_stats.keys()),
+                )
+        elif is_main_process:
+            logging.warning(
+                "use_delta_actions is True but %s not found. "
+                "Run compute_delta_norm_stats.py first.",
+                delta_stats_path,
+            )
+
+    # When use_delta_actions is true, always build processors from scratch —
+    # the delta processors depend on runtime-loaded delta_norm_stats and the
+    # nested ObservationOnlyNormalizerStep can't round-trip through
+    # from_pretrained serialisation.
+    processor_pretrained_path = cfg.policy.pretrained_path
+    if getattr(cfg.policy, "use_delta_actions", False):
+        processor_pretrained_path = None
+
     preprocessor, postprocessor = make_pre_post_processors(
         policy_cfg=cfg.policy,
-        pretrained_path=cfg.policy.pretrained_path,
+        pretrained_path=processor_pretrained_path,
         plugin_features=dataset.plugin_features,
+        delta_norm_stats=delta_norm_stats,
         **processor_kwargs,
         **postprocessor_kwargs,
     )
@@ -291,24 +357,6 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
         logging.info(f"{num_total_params=} ({format_big_number(num_total_params)})")
 
     # --- Dataloader ---
-    # Use RoboCandyWrapper sampler if available, otherwise fall back to EpisodeAwareSampler
-    # if sampler is not None:
-    #     # RoboCandyWrapper custom sampler takes priority
-    #     dl_shuffle = shuffle
-    #     dl_sampler = sampler
-    # elif hasattr(cfg.policy, "drop_n_last_frames"):
-    #     dl_shuffle = False
-    #     dl_sampler = EpisodeAwareSampler(
-    #         dataset.meta.episodes["dataset_from_index"],
-    #         dataset.meta.episodes["dataset_to_index"],
-    #         episode_indices_to_use=dataset.episodes,
-    #         drop_n_last_frames=cfg.policy.drop_n_last_frames,
-    #         shuffle=True,
-    #     )
-    # else:
-    #     dl_shuffle = True
-    #     dl_sampler = None
-
     dataloader = torch.utils.data.DataLoader(
         dataset,
         num_workers=cfg.num_workers,
@@ -362,7 +410,12 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
     for _ in range(step, cfg.steps):
         start_time = time.perf_counter()
         batch = next(dl_iter)
+        # add gripper to last element of observation.state from observation.state.pos
+        batch['observation.state'] = torch.cat([batch['observation.state'], batch['observation.state.pos'][:, :, -1:]], dim=2)
+        # print(f"Original actions, 1st timestamp: {batch['action'][:, 0, :]}")
         batch = preprocessor(batch)
+        # print normalised actions, 1st timestamp, for debugging
+        # print(f"Normalised actions, 1st timestamp: {batch['action'][:, 0, :]}")
         train_tracker.dataloading_s = time.perf_counter() - start_time
 
         train_tracker, output_dict = update_policy(

@@ -388,33 +388,36 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
         dataset_renames = []
         for dataset in self._datasets:
             ds_renames = {}
-            ds_keys = set(dataset.features)
+            # Track available keys as renames are applied: start with original
+            # features, remove sources that are renamed away, add targets that
+            # are renamed into.  This allows transitionary renames like
+            # action → action.pos  then  action.eef_pose → action.
+            available_keys = set(dataset.features)
             
             for source, target in self.key_rename_map.items():
-                if source in ds_keys:
-                    if target in ds_keys:
-                        # Target already exists in this dataset - skip rename to avoid conflict
+                if source in available_keys:
+                    if target in available_keys:
                         logging.warning(
                             f"Skipping rename '{source}' -> '{target}' for {dataset.repo_id}: "
                             f"target key already exists in dataset"
                         )
                     else:
                         ds_renames[source] = target
+                        available_keys.discard(source)
+                        available_keys.add(target)
                         
-                        # Also handle the _is_pad suffix that LeRobot adds for delta_timestamps
-                        # These keys are dynamically added during __getitem__ and may not be in
-                        # dataset.features, but we still want to rename them consistently
                         is_pad_source = f"{source}_is_pad"
                         is_pad_target = f"{target}_is_pad"
                         
-                        # Check for conflicts on the _is_pad key as well
-                        if is_pad_target in ds_keys:
+                        if is_pad_target in available_keys:
                             logging.warning(
                                 f"Skipping derived rename '{is_pad_source}' -> '{is_pad_target}' "
                                 f"for {dataset.repo_id}: target key already exists in dataset"
                             )
                         else:
                             ds_renames[is_pad_source] = is_pad_target
+                            available_keys.discard(is_pad_source)
+                            available_keys.add(is_pad_target)
             
             dataset_renames.append(ds_renames)
         
