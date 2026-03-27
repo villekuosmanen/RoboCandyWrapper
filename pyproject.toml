@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "robocandywrapper"
-version = "0.2.13"
+version = "0.2.14"
 description = "Sweet wrappers for extending and remixing LeRobot Datasets"
 readme = "README.md"
 requires-python = ">=3.10,<3.11"
@@ -27,7 +27,6 @@ dependencies = [
     "torch>=2.0.0",
     "lerobot>=0.4,<0.5",
     "pandas>=1.3.0",
-    "motion-primitives",
     "rewact_tools",
 ]
 
@@ -37,6 +36,7 @@ dev = [
     "black>=22.0.0",
     "isort>=5.10.0",
     "flake8>=4.0.0",
+    "motion-primitives",
     "lerobot-policy-diffusion-motion-primitives"
 ]
 
