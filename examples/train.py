@@ -86,7 +86,7 @@ from lerobot.utils.utils import (
 )
 
 from robocandywrapper.factory import make_dataset
-from robocandywrapper.plugins import EpisodeOutcomePlugin, ControlModePlugin
+from robocandywrapper.plugins import EpisodeOutcomePlugin, ControlModePlugin, MolmoPointPlugin
 from robocandywrapper.samplers import make_sampler
 from robocandywrapper.samplers.factory import load_sampler_config
 from robocandywrapper.utils import WandBLogger
@@ -185,7 +185,7 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
         if is_main_process:
             logging.info(f"Using episode selection from sampler config: {sampler_config.episodes}")
 
-    plugins = [EpisodeOutcomePlugin(), ControlModePlugin(), MotionPrimitivePlugin()]
+    plugins = [EpisodeOutcomePlugin(), ControlModePlugin(), MotionPrimitivePlugin(), MolmoPointPlugin()]
 
     if is_main_process:
         logging.info("Creating dataset")
@@ -193,10 +193,10 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
             cfg,
             plugins=plugins,
             key_rename_map={
-                'observation.state': 'observation.state.pos',
-                'action': 'action.pos',
-                'observation.eef_6d_pose': 'observation.state',
-                'action.eef_pose': 'action',
+                # 'observation.state': 'observation.state.pos',
+                # 'action': 'action.pos',
+                # 'observation.eef_6d_pose': 'observation.state',
+                # 'action.eef_pose': 'action',
             },
         )
 
@@ -205,16 +205,16 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
     if not is_main_process:
         dataset = make_dataset(cfg, plugins=plugins)
 
-    dataset.meta.features['observation.state']= {
-        'dtype': "float32",
-        'shape': (7,),
-    }
-    # Update stats to match the new shape by appending the last element from observation.state
-    for stat_key in ['min', 'max', 'mean', 'std']:
-        dataset.meta.stats['observation.state'][stat_key] = np.concatenate([
-            dataset.meta.stats['observation.state'][stat_key],
-            dataset.meta.stats['observation.state.pos'][stat_key][-1:]
-        ])
+    # dataset.meta.features['observation.state']= {
+    #     'dtype': "float32",
+    #     'shape': (7,),
+    # }
+    # # Update stats to match the new shape by appending the last element from observation.state
+    # for stat_key in ['min', 'max', 'mean', 'std']:
+    #     dataset.meta.stats['observation.state'][stat_key] = np.concatenate([
+    #         dataset.meta.stats['observation.state'][stat_key],
+    #         dataset.meta.stats['observation.state.pos'][stat_key][-1:]
+    #     ])
 
     # --- RoboCandyWrapper: custom sampler ---
     sampler, shuffle, dataset_weights, episodes = make_sampler(dataset, sampler_config=sampler_config)
@@ -411,7 +411,7 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
         start_time = time.perf_counter()
         batch = next(dl_iter)
         # add gripper to last element of observation.state from observation.state.pos
-        batch['observation.state'] = torch.cat([batch['observation.state'], batch['observation.state.pos'][:, :, -1:]], dim=2)
+        # batch['observation.state'] = torch.cat([batch['observation.state'], batch['observation.state.pos'][:, :, -1:]], dim=2)
         # print(f"Original actions, 1st timestamp: {batch['action'][:, 0, :]}")
         batch = preprocessor(batch)
         # print normalised actions, 1st timestamp, for debugging

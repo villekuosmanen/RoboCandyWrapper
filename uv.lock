@@ -762,6 +762,27 @@ requires-dist = [
 ]
 
 [[package]]
+name = "lerobot-policy-diffusion-pointing"
+version = "0.1.0"
+source = { editable = "../../experimental/lerobot_policy_diffusion_pointing" }
+dependencies = [
+    { name = "diffusers" },
+    { name = "einops" },
+    { name = "lerobot" },
+    { name = "torch" },
+    { name = "torchvision" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "diffusers" },
+    { name = "einops", specifier = ">=0.6.0" },
+    { name = "lerobot", specifier = ">=0.4" },
+    { name = "torch" },
+    { name = "torchvision" },
+]
+
+[[package]]
 name = "markupsafe"
 version = "3.0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -1538,11 +1559,12 @@ requires-dist = [
 
 [[package]]
 name = "robocandywrapper"
-version = "0.2.12"
+version = "0.2.14"
 source = { editable = "." }
 dependencies = [
     { name = "lerobot" },
     { name = "lerobot-policy-diffusion-motion-primitives" },
+    { name = "lerobot-policy-diffusion-pointing" },
     { name = "motion-primitives" },
     { name = "numpy" },
     { name = "pandas" },
@@ -1565,6 +1587,7 @@ requires-dist = [
     { name = "isort", marker = "extra == 'dev'", specifier = ">=5.10.0" },
     { name = "lerobot", specifier = ">=0.4,<0.5" },
     { name = "lerobot-policy-diffusion-motion-primitives", editable = "../../experimental/lerobot_policy_diffusion_motion_primitives" },
+    { name = "lerobot-policy-diffusion-pointing", editable = "../../experimental/lerobot_policy_diffusion_pointing" },
     { name = "motion-primitives", editable = "../../experimental/motion_primitives" },
     { name = "numpy", specifier = ">=1.20.0" },
     { name = "pandas", specifier = ">=1.3.0" },

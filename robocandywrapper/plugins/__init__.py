@@ -12,6 +12,10 @@ from robocandywrapper.plugins.episode_outcome import (
     EpisodeOutcomePlugin,
     EpisodeOutcomeInstance,
 )
+from robocandywrapper.plugins.molmopoint import (
+    MolmoPointPlugin,
+    MolmoPointInstance,
+)
 
 __all__ = [
     "ControlModePlugin",
@@ -20,5 +24,7 @@ __all__ = [
     "AffordanceInstance",
     "EpisodeOutcomePlugin",
     "EpisodeOutcomeInstance",
+    "MolmoPointPlugin",
+    "MolmoPointInstance",
 ]
 
