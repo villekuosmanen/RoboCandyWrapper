@@ -10,7 +10,7 @@ from lerobot.datasets.lerobot_dataset import (
     LeRobotDataset,
     LeRobotDatasetMetadata,
 )
-from lerobot.datasets.backward_compatibility import BackwardCompatibilityError
+from lerobot.datasets.utils import BackwardCompatibilityError
 from lerobot.datasets.transforms import ImageTransforms
 from lerobot.datasets.factory import IMAGENET_STATS
 from lerobot.utils.constants import ACTION, REWARD
@@ -71,7 +71,7 @@ def _create_datasets(
     root: Optional[str],
     revision: Optional[str],
     episodes: Optional[list[int] | dict[str, list[int]]],
-    video_backend: str,
+    video_backend: str | None,
     action_delta_indices: Optional[List] = None,
     observation_delta_indices: Optional[List] = None,
     reward_delta_indices: Optional[List] = None,
@@ -250,7 +250,7 @@ def make_dataset_without_config(
     action_delta_indices: List = None,
     observation_delta_indices: List = None,
     root: str = None,
-    video_backend: str = "pyav",
+    video_backend: str | None = None,
     episodes: list[int] | dict[str, list[int]] | None = None,
     revision: str | None = None,
     use_imagenet_stats: bool = True,

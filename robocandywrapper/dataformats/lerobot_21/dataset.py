@@ -38,24 +38,34 @@ from lerobot.datasets.utils import (
     DEFAULT_IMAGE_PATH,
     INFO_PATH,
     LEGACY_TASKS_PATH as TASKS_PATH,
+    check_version_compatibility,
+    create_lerobot_dataset_card,
+    get_safe_version,
+    is_valid_version,
+)
+from lerobot.datasets.feature_utils import (
     _validate_feature_names,
     check_delta_timestamps,
-    check_version_compatibility,
     create_empty_dataset_info,
-    create_lerobot_dataset_card,
-    embed_images,
     get_delta_indices,
     get_hf_features_from_features,
-    get_safe_version,
-    hf_transform_to_torch,
-    is_valid_version,
-    load_info,
-    load_stats,
     validate_episode_buffer,
     validate_frame,
+)
+from lerobot.datasets.io_utils import (
+    embed_images,
+    load_info,
+    load_stats,
     write_info,
     write_json,
 )
+
+def hf_transform_to_torch(item):
+    """Compat shim: transforms HF dataset items to torch tensors."""
+    for key in item:
+        if isinstance(item[key], np.ndarray):
+            item[key] = torch.from_numpy(item[key])
+    return item
 # Import legacy v2.1-specific functions that were removed in lerobot 0.4.1
 from robocandywrapper.dataformats.lerobot_21.utils import (
     append_jsonlines,

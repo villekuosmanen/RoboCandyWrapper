@@ -34,7 +34,7 @@ from huggingface_hub import HfApi
 from tqdm import tqdm
 
 from lerobot.datasets.compute_stats import aggregate_stats, get_feature_stats, sample_indices
-from lerobot.datasets.utils import load_stats, write_info
+from lerobot.datasets.io_utils import load_stats, write_info
 
 from robocandywrapper.dataformats.lerobot_21.dataset import LeRobot21Dataset
 from robocandywrapper.dataformats.lerobot_21.utils import (

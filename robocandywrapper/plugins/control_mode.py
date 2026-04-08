@@ -197,9 +197,12 @@ class ControlModeInstance(PluginInstance):
         """Find the episode_modes.json file for a dataset root, or None."""
         cw = dataset_root / CANDYWRAPPER_PLUGINS_DIR
         legacy = cw / "dagger_data_source" / "episode_modes.json"
+        legacy_2 = dataset_root / "dagger_data_source" / "episode_modes.json"
         current = cw / CONTROL_MODE_PLUGIN_NAME / "episode_modes.json"
         if legacy.exists():
             return legacy
+        if legacy_2.exists():
+            return legacy_2
         if current.exists():
             return current
         return None
