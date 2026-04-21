@@ -759,7 +759,7 @@ class LeRobot21Dataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx) -> dict:
         item = self.hf_dataset[idx]
-        ep_idx = item["episode_index"].item()
+        ep_idx = item["episode_index"].item() if isinstance(item["episode_index"], torch.Tensor) else item["episode_index"]
 
         query_indices = None
         if self.delta_indices is not None:
@@ -770,7 +770,7 @@ class LeRobot21Dataset(torch.utils.data.Dataset):
                 item[key] = val
 
         if len(self.meta.video_keys) > 0:
-            current_ts = item["timestamp"].item()
+            current_ts = item["timestamp"].item() if isinstance(item["timestamp"], torch.Tensor) else item["timestamp"]
             query_timestamps = self._get_query_timestamps(current_ts, query_indices)
             video_frames = self._query_videos(query_timestamps, ep_idx)
             item = {**video_frames, **item}
@@ -781,7 +781,7 @@ class LeRobot21Dataset(torch.utils.data.Dataset):
                 item[cam] = self.image_transforms(item[cam])
 
         # Add task as a string
-        task_idx = item["task_index"].item()
+        task_idx = item["task_index"].item() if isinstance(item["task_index"], torch.Tensor) else item["task_index"]
         item["task"] = self.meta.tasks[task_idx]
 
         # Hack - add gripper position to end
