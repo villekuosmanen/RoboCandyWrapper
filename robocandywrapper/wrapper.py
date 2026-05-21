@@ -627,7 +627,7 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
         else:
             item = dataset[local_idx]
 
-        episode_idx = item["episode_index"].item()
+        episode_idx = item["episode_index"].item() if isinstance(item["episode_index"], torch.Tensor) else item["episode_index"]
         
         # Add dataset index
         item["dataset_index"] = torch.tensor(dataset_idx)
