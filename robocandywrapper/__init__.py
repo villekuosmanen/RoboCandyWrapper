@@ -18,7 +18,7 @@ from robocandywrapper.constants import (
     MOTION_PRIMITIVE_PLUGIN_NAME,
 )
 
-__version__ = "0.2.16"
+__version__ = "0.2.17"
 
 __all__ = [
     "DatasetPlugin",
