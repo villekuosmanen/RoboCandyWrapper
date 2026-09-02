@@ -8,21 +8,22 @@ import numpy as np
 import pandas as pd
 
 
-def _task_names_from_meta_tasks(meta_tasks) -> set[str]:
+def _task_index_to_name(meta_tasks) -> dict[int, str]:
     """
-    Extract task name strings from a dataset's meta.tasks in either format.
+    Normalize a dataset's task metadata to task_index -> task name.
 
     - LeRobot 2.1 (dict): tasks is dict[task_index, task_name].
     - LeRobot 3.0 (parquet/DataFrame): tasks is a pandas DataFrame where the
       *row index* is the task name (string) and the only column is "task_index"
       (integer). So: df.index = task names, df["task_index"] = indices.
 
-    Returns a set of unique task name strings.
+    Some task tables instead include both "task_index" and "task" columns.
     """
     if meta_tasks is None:
-        return set()
+        return {}
     if isinstance(meta_tasks, dict):
-        return {str(v) for v in meta_tasks.values() if isinstance(v, str)}
+        return {int(task_index): str(name) for task_index, name in meta_tasks.items()}
+
     # DataFrame or object with to_pandas() (e.g. HuggingFace Dataset)
     df = None
     if hasattr(meta_tasks, "to_pandas"):
@@ -30,14 +31,24 @@ def _task_names_from_meta_tasks(meta_tasks) -> set[str]:
     elif isinstance(meta_tasks, pd.DataFrame):
         df = meta_tasks
     if df is None:
-        return set()
-    # 3.0 format: optional "task" column, else task names are the row index
-    if "task" in df.columns:
-        return set(df["task"].dropna().astype(str).unique())
+        return {}
+
     if "task_index" in df.columns:
-        # Task names are the DataFrame index (row labels), not the column
-        return set(df.index.astype(str))
-    return set()
+        if "task" in df.columns:
+            return {
+                int(row["task_index"]): str(row["task"])
+                for _, row in df.iterrows()
+            }
+        return {
+            int(row["task_index"]): str(task_name)
+            for task_name, row in df.iterrows()
+        }
+    if "task" in df.columns:
+        return {
+            int(task_index): str(name)
+            for task_index, name in enumerate(df["task"])
+        }
+    return {}
 
 
 def aggregate_stats_weighted(
@@ -301,7 +312,7 @@ class WrappedRobotDatasetMetadataView:
         all_task_names: set[str] = set()
         for dataset in self._datasets:
             meta_tasks = getattr(dataset.meta, "tasks", None)
-            all_task_names.update(_task_names_from_meta_tasks(meta_tasks))
+            all_task_names.update(_task_index_to_name(meta_tasks).values())
 
         sorted_names = sorted(all_task_names)
         self._tasks = {idx: name for idx, name in enumerate(sorted_names)}

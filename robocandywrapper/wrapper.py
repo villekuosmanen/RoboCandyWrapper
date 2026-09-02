@@ -9,7 +9,10 @@ from lerobot.configs.types import FeatureType, PolicyFeature
 import torch
 
 from robocandywrapper import DatasetPlugin, PluginConflictError, PluginInstance
-from robocandywrapper.metadata_view import WrappedRobotDatasetMetadataView
+from robocandywrapper.metadata_view import (
+    WrappedRobotDatasetMetadataView,
+    _task_index_to_name,
+)
 
 
 class WrappedRobotDataset(torch.utils.data.Dataset):
@@ -114,6 +117,15 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
             dataset_weights=dataset_weights,
             dataset_renames=self._dataset_renames,
         )
+        self._task_index_remaps = [
+            {
+                inner_index: self._meta.task_to_task_index[task_name]
+                for inner_index, task_name in _task_index_to_name(
+                    getattr(dataset.meta, "tasks", None)
+                ).items()
+            }
+            for dataset in self._datasets
+        ]
 
         # ** MATCHING LeRobot MULTI-DATASET API DESIGN **
         
@@ -626,6 +638,25 @@ class WrappedRobotDataset(torch.utils.data.Dataset):
             item = dataset[real_idx]
         else:
             item = dataset[local_idx]
+
+        if "task_index" in item and self._task_index_remaps[dataset_idx]:
+            task_index = item["task_index"]
+            inner_task_index = (
+                int(task_index.item()) if isinstance(task_index, torch.Tensor) else int(task_index)
+            )
+            try:
+                unified_task_index = self._task_index_remaps[dataset_idx][inner_task_index]
+            except KeyError:
+                raise KeyError(
+                    f"task_index {inner_task_index} from dataset {dataset.repo_id!r} "
+                    "is missing from its task metadata"
+                ) from None
+
+            if isinstance(task_index, torch.Tensor):
+                item["task_index"] = task_index.new_tensor(unified_task_index)
+            else:
+                item["task_index"] = unified_task_index
+            item["task"] = self._meta.tasks[unified_task_index]
 
         episode_idx = item["episode_index"].item() if isinstance(item["episode_index"], torch.Tensor) else item["episode_index"]
         
